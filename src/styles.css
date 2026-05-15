@@ -230,7 +230,7 @@ button:focus-visible {
 }
 
 .workflow-actions-grid {
-  grid-template-columns: minmax(420px, 1fr) minmax(520px, 1.25fr);
+  grid-template-columns: minmax(560px, 1fr) minmax(520px, 1.1fr);
 }
 
 .workflow-buckets-grid {
@@ -522,8 +522,11 @@ button:focus-visible {
 
 .workflow-action-header {
   display: grid;
-  grid-template-columns: 30px minmax(160px, 1fr) minmax(120px, 0.75fr) minmax(120px, 0.75fr) auto auto;
-  gap: 8px;
+  grid-template-areas:
+    "spacer label from to action order"
+    "spacer trigger visible handler handler order";
+  grid-template-columns: 30px minmax(150px, 1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) auto auto;
+  gap: 6px 8px;
   padding: 0 8px;
   color: var(--text-muted);
   font-size: 0.76rem;
@@ -533,13 +536,70 @@ button:focus-visible {
 
 .workflow-action-row {
   display: grid;
-  grid-template-columns: 30px minmax(160px, 1fr) minmax(120px, 0.75fr) minmax(120px, 0.75fr) auto auto;
+  grid-template-areas:
+    "drag label from to remove order"
+    "drag trigger visible handler handler order";
+  grid-template-columns: 30px minmax(150px, 1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) auto auto;
   gap: 8px;
   align-items: center;
   border: 1px solid var(--border-subtle);
   border-radius: 7px;
   background: var(--surface-muted);
   padding: 8px;
+}
+
+.workflow-action-header-spacer {
+  grid-area: spacer;
+}
+
+.workflow-action-header-label,
+.workflow-action-label-input {
+  grid-area: label;
+}
+
+.workflow-action-header-from,
+.workflow-action-source-select {
+  grid-area: from;
+}
+
+.workflow-action-header-to,
+.workflow-action-target-select {
+  grid-area: to;
+}
+
+.workflow-action-header-trigger,
+.workflow-action-trigger-select {
+  grid-area: trigger;
+}
+
+.workflow-action-header-visible,
+.action-visible-check {
+  grid-area: visible;
+}
+
+.workflow-action-header-handler,
+.workflow-action-handler-input {
+  grid-area: handler;
+}
+
+.workflow-action-header-action,
+.workflow-action-remove {
+  grid-area: remove;
+}
+
+.workflow-action-header-order,
+.workflow-action-row .state-reorder-controls {
+  grid-area: order;
+}
+
+.workflow-action-row .state-drag-handle {
+  grid-area: drag;
+  align-self: stretch;
+}
+
+.workflow-action-row input,
+.workflow-action-row select {
+  min-width: 0;
 }
 
 .workflow-bucket-list,
@@ -560,7 +620,7 @@ button:focus-visible {
 }
 
 .bucket-row {
-  grid-template-columns: 30px minmax(160px, 1fr) auto auto auto;
+  grid-template-columns: 30px minmax(160px, 1fr) auto auto auto auto;
 }
 
 .bucket-row.selected,
@@ -582,7 +642,7 @@ button:focus-visible {
 }
 
 .assignment-row {
-  grid-template-columns: minmax(130px, 1fr) auto;
+  grid-template-columns: minmax(130px, 1fr) auto auto;
 }
 
 .assignment-row.draft {

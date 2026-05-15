@@ -5,6 +5,7 @@ import {
   WORKFLOW_SCHEMA_VERSION,
   StateMachineDefinition,
   WorkflowAction,
+  WorkflowActionTrigger,
   WorkflowBucket,
   WorkflowDefinition,
   defineStateMachine,
@@ -97,18 +98,19 @@ const initialWorkflowDefinition: EditableWorkflowDefinition = {
     id: initialDefinition.id,
     definitionVersion: initialDefinition.definitionVersion,
   },
+  states: initialDefinition.states.map((state) => ({ id: state, visible: true })),
   actions: [
-    { id: "start", label: "Start", from: "queued", to: "running" },
-    { id: "complete", label: "Complete", from: "running", to: "completed" },
-    { id: "fail", label: "Fail", from: "running", to: "failed" },
-    { id: "retry", label: "Retry", from: "failed", to: "queued" },
-    { id: "cancel_queued", label: "Cancel", from: "queued", to: "cancelled" },
-    { id: "cancel_running", label: "Cancel", from: "running", to: "cancelled" },
+    { id: "start", label: "Start", from: "queued", to: "running", trigger: "user", visible: true },
+    { id: "complete", label: "Complete", from: "running", to: "completed", trigger: "user", visible: true },
+    { id: "fail", label: "Fail", from: "running", to: "failed", trigger: "user", visible: true },
+    { id: "retry", label: "Retry", from: "failed", to: "queued", trigger: "user", visible: true },
+    { id: "cancel_queued", label: "Cancel", from: "queued", to: "cancelled", trigger: "user", visible: true },
+    { id: "cancel_running", label: "Cancel", from: "running", to: "cancelled", trigger: "user", visible: true },
   ],
   buckets: [
-    { id: "waiting", label: "Waiting", states: ["queued"] },
-    { id: "active", label: "Active", states: ["running", "failed"] },
-    { id: "finished", label: "Finished", states: ["completed", "cancelled"] },
+    { id: "waiting", label: "Waiting", visible: true, states: ["queued"] },
+    { id: "active", label: "Active", visible: true, states: ["running", "failed"] },
+    { id: "finished", label: "Finished", visible: true, states: ["completed", "cancelled"] },
   ],
 };
 
@@ -175,6 +177,15 @@ export function App() {
   const workflowBuckets = linkedWorkflow.buckets.map((bucket, index) => ({ ...bucket, index }));
   const selectedBucket = workflowBuckets.find((bucket) => bucket.id === selectedBucketId) ?? workflowBuckets[0];
   const selectedBucketStates = selectedBucket?.states ?? [];
+  const workflowStateVisibility = useMemo(() => {
+    const visibility = new Map<string, boolean>();
+
+    for (const state of linkedWorkflow.states) {
+      visibility.set(state.id, state.visible);
+    }
+
+    return visibility;
+  }, [linkedWorkflow.states]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
@@ -214,7 +225,10 @@ export function App() {
       const nextState = nextUniqueStateId(current.states);
 
       setSelectedState(nextState);
-      setWorkflow((currentWorkflow) => assignStateToBucket(currentWorkflow, nextState, selectedBucketId));
+      setWorkflow((currentWorkflow) => ({
+        ...assignStateToBucket(currentWorkflow, nextState, selectedBucketId),
+        states: [...currentWorkflow.states, { id: nextState, visible: true }],
+      }));
 
       return {
         ...current,
@@ -247,6 +261,10 @@ export function App() {
         from: action.from === previousState ? nextState : action.from,
         to: action.to === previousState ? nextState : action.to,
       })),
+      states: current.states.map((state) => ({
+        ...state,
+        id: state.id === previousState ? nextState : state.id,
+      })),
       buckets: current.buckets.map((bucket) => ({
         ...bucket,
         states: bucket.states.map((state) => (state === previousState ? nextState : state)),
@@ -275,6 +293,7 @@ export function App() {
     setWorkflow((current) => ({
       ...current,
       actions: current.actions.filter((action) => action.from !== removedState && action.to !== removedState),
+      states: current.states.filter((state) => state.id !== removedState),
       buckets: current.buckets.map((bucket) => ({
         ...bucket,
         states: bucket.states.filter((state) => state !== removedState),
@@ -354,12 +373,12 @@ export function App() {
 
       return {
         ...current,
-        actions: [...current.actions, { id, label: titleCaseAction(id), from, to }],
+        actions: [...current.actions, { id, label: titleCaseAction(id), from, to, trigger: "user", visible: true }],
       };
     });
   }
 
-  function updateWorkflowAction(index: number, field: keyof WorkflowAction<string>, value: string) {
+  function updateWorkflowAction(index: number, field: "label" | "from" | "to", value: string) {
     setWorkflow((current) => ({
       ...current,
       actions: current.actions.map((action, actionIndex) => {
@@ -376,6 +395,50 @@ export function App() {
         }
 
         return { ...action, [field]: value };
+      }),
+    }));
+  }
+
+  function updateWorkflowActionTrigger(index: number, trigger: WorkflowActionTrigger) {
+    setWorkflow((current) => ({
+      ...current,
+      actions: current.actions.map((action, actionIndex) => {
+        if (actionIndex !== index) {
+          return action;
+        }
+
+        return {
+          ...action,
+          trigger,
+          visible: trigger === "user",
+        };
+      }),
+    }));
+  }
+
+  function updateWorkflowActionVisible(index: number, visible: boolean) {
+    setWorkflow((current) => ({
+      ...current,
+      actions: current.actions.map((action, actionIndex) =>
+        actionIndex === index ? { ...action, visible } : action,
+      ),
+    }));
+  }
+
+  function updateWorkflowActionHandlerKey(index: number, handlerKey: string) {
+    setWorkflow((current) => ({
+      ...current,
+      actions: current.actions.map((action, actionIndex) => {
+        if (actionIndex !== index) {
+          return action;
+        }
+
+        const trimmedHandlerKey = handlerKey.trim();
+
+        return {
+          ...action,
+          processing: trimmedHandlerKey ? { handlerKey: trimmedHandlerKey } : undefined,
+        };
       }),
     }));
   }
@@ -425,7 +488,7 @@ export function App() {
   function addWorkflowBucket() {
     setWorkflow((current) => {
       const id = nextUniqueBucketId(current.buckets);
-      const nextBucket = { id, label: titleCaseAction(id), states: [] };
+      const nextBucket = { id, label: titleCaseAction(id), visible: true, states: [] };
 
       setSelectedBucketId(id);
 
@@ -456,6 +519,24 @@ export function App() {
           id: nextId,
         };
       }),
+    }));
+  }
+
+  function toggleWorkflowBucketVisible(index: number, visible: boolean) {
+    setWorkflow((current) => ({
+      ...current,
+      buckets: current.buckets.map((bucket, bucketIndex) =>
+        bucketIndex === index ? { ...bucket, visible } : bucket,
+      ),
+    }));
+  }
+
+  function toggleWorkflowStateVisible(state: string, visible: boolean) {
+    setWorkflow((current) => ({
+      ...current,
+      states: current.states.map((workflowState) =>
+        workflowState.id === state ? { ...workflowState, visible } : workflowState,
+      ),
     }));
   }
 
@@ -554,7 +635,7 @@ export function App() {
     const setActiveMessage = activePage === "workflow" ? setWorkflowMessage : setStateMachineMessage;
 
     if (!fileSystemWindow.showDirectoryPicker) {
-      setActiveMessage("Folder picker is not supported in this browser. Type the target project name manually.");
+      setActiveMessage("Folder picker is not supported in this browser. Type the target app name manually.");
       return;
     }
 
@@ -563,14 +644,14 @@ export function App() {
       const project = await inferProjectNameFromDirectory(directory);
 
       updateTargetProject(project.name);
-      setActiveMessage(`Selected project "${project.name}" from ${project.source}.`);
+      setActiveMessage(`Selected app "${project.name}" from ${project.source}.`);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        setActiveMessage("Project selection cancelled.");
+        setActiveMessage("App selection cancelled.");
         return;
       }
 
-      setActiveMessage(error instanceof Error ? error.message : "Unable to select project folder.");
+      setActiveMessage(error instanceof Error ? error.message : "Unable to select app folder.");
     }
   }
 
@@ -726,7 +807,7 @@ export function App() {
           <section className="fixed-control-grid">
             <section className="panel machine-panel">
               <div className="metadata-field">
-                <label htmlFor="app-name">Target Project</label>
+                <label htmlFor="app-name">Target App</label>
                 <div className="target-project-control">
                   <input
                     id="app-name"
@@ -851,7 +932,7 @@ export function App() {
           <section className="fixed-control-grid">
             <section className="panel machine-panel workflow-metadata-panel">
               <div className="metadata-field">
-                <label htmlFor="workflow-app-name">Target Project</label>
+                <label htmlFor="workflow-app-name">Target App</label>
                 <div className="target-project-control">
                   <input
                     id="workflow-app-name"
@@ -963,15 +1044,18 @@ export function App() {
                         value={selectedState}
                         states={stateOptions}
                         onChange={setSelectedState}
-                    />
-                  </div>
-                  <div className="workflow-action-header" aria-hidden="true">
-                      <span />
-                      <span>Button Label</span>
-                      <span>From State</span>
-                      <span>To State</span>
-                      <span>Action</span>
-                      <span>Order</span>
+                      />
+                    </div>
+                    <div className="workflow-action-header" aria-hidden="true">
+                      <span className="workflow-action-header-spacer" />
+                      <span className="workflow-action-header-label">Button Label</span>
+                      <span className="workflow-action-header-from">From State</span>
+                      <span className="workflow-action-header-to">To State</span>
+                      <span className="workflow-action-header-trigger">Trigger</span>
+                      <span className="workflow-action-header-visible">Visible</span>
+                      <span className="workflow-action-header-handler">Handler Key</span>
+                      <span className="workflow-action-header-action">Action</span>
+                      <span className="workflow-action-header-order">Order</span>
                     </div>
                   </div>
                   <div className="column-scroll">
@@ -980,6 +1064,9 @@ export function App() {
                       selectedState={selectedState}
                       states={stateOptions}
                       onChange={updateWorkflowAction}
+                      onTriggerChange={updateWorkflowActionTrigger}
+                      onVisibleChange={updateWorkflowActionVisible}
+                      onHandlerKeyChange={updateWorkflowActionHandlerKey}
                       onRemove={removeWorkflowAction}
                       onReorder={moveWorkflowAction}
                     />
@@ -988,51 +1075,54 @@ export function App() {
               ) : (
                 <>
                   <section className="panel column-panel workflow-bucket-list-panel">
-                  <div className="panel-heading">
-                    <h2>Buckets</h2>
-                    <button type="button" className="secondary compact" onClick={addWorkflowBucket}>
+                    <div className="panel-heading">
+                      <h2>Buckets</h2>
+                      <button type="button" className="secondary compact" onClick={addWorkflowBucket}>
                         Add Bucket
                       </button>
                     </div>
-                  <div className="column-scroll">
-                    <WorkflowBucketList
-                      buckets={workflowBuckets}
-                      selectedBucketId={selectedBucket?.id ?? ""}
-                      onSelect={setSelectedBucketId}
+                    <div className="column-scroll">
+                      <WorkflowBucketList
+                        buckets={workflowBuckets}
+                        selectedBucketId={selectedBucket?.id ?? ""}
+                        onSelect={setSelectedBucketId}
                         onRename={updateWorkflowBucketLabel}
+                        onToggleVisible={toggleWorkflowBucketVisible}
                         onRemove={removeWorkflowBucket}
                         onReorder={moveWorkflowBucket}
                       />
                     </div>
                   </section>
 
-                <section className="panel column-panel workflow-bucket-assignment-panel">
-                  <div className="panel-heading">
-                    <div>
-                      <h2>State Mapping</h2>
-                      <p className="panel-subtitle">{selectedBucket?.label ?? "No bucket selected"}</p>
+                  <section className="panel column-panel workflow-bucket-assignment-panel">
+                    <div className="panel-heading">
+                      <div>
+                        <h2>State Mapping</h2>
+                        <p className="panel-subtitle">{selectedBucket?.label ?? "No bucket selected"}</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="secondary compact"
+                        onClick={addStateMappingRow}
+                        disabled={!selectedBucket || draftStateBucketId === selectedBucket.id}
+                      >
+                        Add State
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      className="secondary compact"
-                      onClick={addStateMappingRow}
-                      disabled={!selectedBucket || draftStateBucketId === selectedBucket.id}
-                    >
-                      Add State
-                    </button>
-                  </div>
-                  <div className="column-scroll">
-                    <WorkflowBucketAssignmentList
-                      states={stateOptions}
-                      selectedBucket={selectedBucket}
-                      selectedBucketStates={selectedBucketStates}
-                      showDraftRow={draftStateBucketId === selectedBucket?.id}
-                      onSelectState={selectStateForBucket}
-                      onCancelDraft={cancelStateMappingRow}
-                      onRemoveState={removeStateFromSelectedBucket}
-                    />
-                  </div>
-                </section>
+                    <div className="column-scroll">
+                      <WorkflowBucketAssignmentList
+                        states={stateOptions}
+                        selectedBucket={selectedBucket}
+                        selectedBucketStates={selectedBucketStates}
+                        stateVisibility={workflowStateVisibility}
+                        showDraftRow={draftStateBucketId === selectedBucket?.id}
+                        onToggleStateVisible={toggleWorkflowStateVisible}
+                        onSelectState={selectStateForBucket}
+                        onCancelDraft={cancelStateMappingRow}
+                        onRemoveState={removeStateFromSelectedBucket}
+                      />
+                    </div>
+                  </section>
                 </>
               )}
 
@@ -1079,8 +1169,8 @@ function TargetProjectPicker({ onClick }: { onClick: () => void }) {
       type="button"
       className="secondary compact icon-button"
       onClick={onClick}
-      aria-label="Choose project folder"
-      title="Choose project folder"
+      aria-label="Choose app folder"
+      title="Choose app folder"
     >
       <span className="folder-icon" aria-hidden="true" />
     </button>
@@ -1309,13 +1399,19 @@ function WorkflowActionList({
   selectedState,
   states,
   onChange,
+  onTriggerChange,
+  onVisibleChange,
+  onHandlerKeyChange,
   onRemove,
   onReorder,
 }: {
   actions: WorkflowActionWithIndex[];
   selectedState: string;
   states: string[];
-  onChange: (index: number, field: keyof WorkflowAction<string>, value: string) => void;
+  onChange: (index: number, field: "label" | "from" | "to", value: string) => void;
+  onTriggerChange: (index: number, trigger: WorkflowActionTrigger) => void;
+  onVisibleChange: (index: number, visible: boolean) => void;
+  onHandlerKeyChange: (index: number, handlerKey: string) => void;
   onRemove: (index: number) => void;
   onReorder: (fromVisibleIndex: number, toVisibleIndex: number) => void;
 }) {
@@ -1401,24 +1497,53 @@ function WorkflowActionList({
               </span>
             </button>
             <input
+              className="workflow-action-label-input"
               aria-label={`Action ${action.index + 1} label`}
               value={action.label}
               onChange={(event) => onChange(action.index, "label", event.target.value)}
               spellCheck={false}
             />
             <StateSelect
+              className="workflow-action-source-select"
               label={`Action ${action.index + 1} source`}
               value={action.from}
               states={states}
               onChange={(value) => onChange(action.index, "from", value)}
             />
             <StateSelect
+              className="workflow-action-target-select"
               label={`Action ${action.index + 1} target`}
               value={action.to}
               states={states}
               onChange={(value) => onChange(action.index, "to", value)}
             />
-            <button type="button" className="ghost compact" onClick={() => onRemove(action.index)}>
+            <select
+              className="workflow-action-trigger-select"
+              aria-label={`Action ${action.index + 1} trigger`}
+              value={action.trigger}
+              onChange={(event) => onTriggerChange(action.index, event.target.value as WorkflowActionTrigger)}
+            >
+              <option value="user">User</option>
+              <option value="automatic">Automatic</option>
+            </select>
+            <label className="inline-check action-visible-check">
+              <input
+                type="checkbox"
+                aria-label={`Action ${action.index + 1} visible`}
+                checked={action.visible}
+                onChange={(event) => onVisibleChange(action.index, event.target.checked)}
+              />
+              Visible
+            </label>
+            <input
+              className="workflow-action-handler-input"
+              aria-label={`Action ${action.index + 1} handler key`}
+              value={action.processing?.handlerKey ?? ""}
+              onChange={(event) => onHandlerKeyChange(action.index, event.target.value)}
+              placeholder="optional_handler"
+              spellCheck={false}
+            />
+            <button type="button" className="ghost compact workflow-action-remove" onClick={() => onRemove(action.index)}>
               Remove
             </button>
             <div className="state-reorder-controls" aria-label={`${actionLabel} action keyboard reorder controls`}>
@@ -1453,6 +1578,7 @@ function WorkflowBucketList({
   selectedBucketId,
   onSelect,
   onRename,
+  onToggleVisible,
   onRemove,
   onReorder,
 }: {
@@ -1460,6 +1586,7 @@ function WorkflowBucketList({
   selectedBucketId: string;
   onSelect: (bucketId: string) => void;
   onRename: (index: number, label: string) => void;
+  onToggleVisible: (index: number, visible: boolean) => void;
   onRemove: (index: number) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
 }) {
@@ -1559,6 +1686,16 @@ function WorkflowBucketList({
             <span className="bucket-count" aria-label={`${bucket.label || `Bucket ${bucket.index + 1}`} state count`}>
               {bucket.states.length}
             </span>
+            <label className="inline-check">
+              <input
+                type="checkbox"
+                aria-label={`Bucket ${bucket.index + 1} visible`}
+                checked={bucket.visible}
+                onChange={(event) => onToggleVisible(bucket.index, event.target.checked)}
+                onClick={(event) => event.stopPropagation()}
+              />
+              Visible
+            </label>
             <button
               type="button"
               className="ghost compact"
@@ -1608,7 +1745,9 @@ function WorkflowBucketAssignmentList({
   states,
   selectedBucket,
   selectedBucketStates,
+  stateVisibility,
   showDraftRow,
+  onToggleStateVisible,
   onSelectState,
   onCancelDraft,
   onRemoveState,
@@ -1616,7 +1755,9 @@ function WorkflowBucketAssignmentList({
   states: string[];
   selectedBucket?: WorkflowBucketWithIndex;
   selectedBucketStates: readonly string[];
+  stateVisibility: Map<string, boolean>;
   showDraftRow: boolean;
+  onToggleStateVisible: (state: string, visible: boolean) => void;
   onSelectState: (state: string) => void;
   onCancelDraft: () => void;
   onRemoveState: (state: string) => void;
@@ -1636,6 +1777,15 @@ function WorkflowBucketAssignmentList({
           <div className="assignment-state">
             <span>{state}</span>
           </div>
+          <label className="inline-check">
+            <input
+              type="checkbox"
+              aria-label={`${state} visible`}
+              checked={stateVisibility.get(state) ?? true}
+              onChange={(event) => onToggleStateVisible(state, event.target.checked)}
+            />
+            Visible
+          </label>
           <button type="button" className="ghost compact" onClick={() => onRemoveState(state)}>
             Remove
           </button>
@@ -1658,19 +1808,21 @@ function WorkflowBucketAssignmentList({
 
 function StateSelect({
   id,
+  className,
   label,
   value,
   states,
   onChange,
 }: {
   id?: string;
+  className?: string;
   label: string;
   value: string;
   states: string[];
   onChange: (value: string) => void;
 }) {
   return (
-    <select id={id} aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
+    <select id={id} className={className} aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
       {!states.includes(value) ? <option value={value}>{value || "Select state"}</option> : null}
       {states.map((state) => (
         <option key={state} value={state}>
@@ -1970,8 +2122,10 @@ function normalizeImportedDefinition(value: Partial<EditableDefinition>): Editab
   };
 }
 
-type ImportedWorkflowDefinition = Partial<Omit<EditableWorkflowDefinition, "schemaVersion" | "buckets">> & {
+type ImportedWorkflowDefinition = Partial<Omit<EditableWorkflowDefinition, "schemaVersion" | "states" | "actions" | "buckets">> & {
   schemaVersion?: string;
+  states?: unknown;
+  actions?: unknown;
   buckets?: unknown;
 };
 
@@ -1994,13 +2148,64 @@ function normalizeImportedWorkflowDefinition(
       definitionVersion: value.stateMachine?.definitionVersion ?? "",
     },
     embeddedStateMachineDefinition,
-    actions: Array.isArray(value.actions) ? value.actions : [],
+    states: normalizeImportedWorkflowStates(value.states, effectiveStateMachine.states),
+    actions: normalizeImportedWorkflowActions(value.actions),
     buckets: normalizeImportedWorkflowBuckets(value.buckets, effectiveStateMachine.states),
   };
 }
 
 function normalizeImportedWorkflowSchemaVersion(schemaVersion: string | undefined): typeof WORKFLOW_SCHEMA_VERSION {
-  return (schemaVersion === "0.1.0" ? WORKFLOW_SCHEMA_VERSION : schemaVersion ?? WORKFLOW_SCHEMA_VERSION) as typeof WORKFLOW_SCHEMA_VERSION;
+  return (schemaVersion === "0.1.0" || schemaVersion === "0.2.0"
+    ? WORKFLOW_SCHEMA_VERSION
+    : schemaVersion ?? WORKFLOW_SCHEMA_VERSION) as typeof WORKFLOW_SCHEMA_VERSION;
+}
+
+function normalizeImportedWorkflowStates(value: unknown, states: readonly string[]) {
+  if (!Array.isArray(value)) {
+    return states.map((state) => ({ id: state, visible: true }));
+  }
+
+  return value.map((state, index) => {
+    if (typeof state === "string") {
+      return { id: state, visible: true };
+    }
+
+    const stateRecord = state && typeof state === "object" ? (state as Record<string, unknown>) : {};
+
+    return {
+      id: typeof stateRecord.id === "string" ? stateRecord.id : states[index] ?? "",
+      visible: typeof stateRecord.visible === "boolean" ? stateRecord.visible : true,
+    };
+  });
+}
+
+function normalizeImportedWorkflowActions(value: unknown): WorkflowAction<string>[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((action) => {
+    const actionRecord = action && typeof action === "object" ? (action as Record<string, unknown>) : {};
+    const trigger = actionRecord.trigger === "automatic" ? "automatic" : "user";
+    const processingRecord =
+      actionRecord.processing && typeof actionRecord.processing === "object"
+        ? (actionRecord.processing as Record<string, unknown>)
+        : undefined;
+    const handlerKey =
+      processingRecord && typeof processingRecord.handlerKey === "string"
+        ? processingRecord.handlerKey.trim()
+        : "";
+
+    return {
+      id: typeof actionRecord.id === "string" ? actionRecord.id : "",
+      label: typeof actionRecord.label === "string" ? actionRecord.label : "",
+      from: typeof actionRecord.from === "string" ? actionRecord.from : "",
+      to: typeof actionRecord.to === "string" ? actionRecord.to : "",
+      trigger,
+      visible: typeof actionRecord.visible === "boolean" ? actionRecord.visible : trigger === "user",
+      processing: handlerKey ? { handlerKey } : undefined,
+    };
+  });
 }
 
 function normalizeImportedWorkflowBuckets(value: unknown, states: readonly string[]): WorkflowBucket<string>[] {
@@ -2014,13 +2219,14 @@ function normalizeImportedWorkflowBuckets(value: unknown, states: readonly strin
     return {
       id: typeof bucketRecord.id === "string" ? bucketRecord.id : `bucket_${index + 1}`,
       label: typeof bucketRecord.label === "string" ? bucketRecord.label : `Bucket ${index + 1}`,
+      visible: typeof bucketRecord.visible === "boolean" ? bucketRecord.visible : true,
       states: Array.isArray(bucketRecord.states) ? bucketRecord.states.filter((state): state is string => typeof state === "string") : [],
     };
   });
 }
 
 function createDefaultWorkflowBuckets(states: readonly string[]): WorkflowBucket<string>[] {
-  return [{ id: "workflow", label: "Workflow", states: [...states] }];
+  return [{ id: "workflow", label: "Workflow", visible: true, states: [...states] }];
 }
 
 function withCurrentStateMachineReference(

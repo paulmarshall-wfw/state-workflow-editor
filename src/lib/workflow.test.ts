@@ -35,16 +35,17 @@ const workflow: WorkflowDefinition = {
     id: "scan_job_state",
     definitionVersion: "0.1.0",
   },
+  states: stateMachine.states.map((state) => ({ id: state, visible: true })),
   actions: [
-    { id: "start", label: "Start", from: "queued", to: "running" },
-    { id: "complete", label: "Complete", from: "running", to: "completed" },
-    { id: "fail", label: "Fail", from: "running", to: "failed" },
-    { id: "retry", label: "Retry", from: "failed", to: "queued" },
+    { id: "start", label: "Start", from: "queued", to: "running", trigger: "user", visible: true },
+    { id: "complete", label: "Complete", from: "running", to: "completed", trigger: "user", visible: true },
+    { id: "fail", label: "Fail", from: "running", to: "failed", trigger: "user", visible: true },
+    { id: "retry", label: "Retry", from: "failed", to: "queued", trigger: "user", visible: true },
   ],
   buckets: [
-    { id: "waiting", label: "Waiting", states: ["queued"] },
-    { id: "active", label: "Active", states: ["running", "failed"] },
-    { id: "finished", label: "Finished", states: ["completed", "cancelled"] },
+    { id: "waiting", label: "Waiting", visible: true, states: ["queued"] },
+    { id: "active", label: "Active", visible: true, states: ["running", "failed"] },
+    { id: "finished", label: "Finished", visible: true, states: ["completed", "cancelled"] },
   ],
 };
 
@@ -87,8 +88,8 @@ describe("workflow definition validation", () => {
         ...workflow,
         actions: [
           ...workflow.actions,
-          { id: "start", label: "Duplicate start", from: "queued", to: "running" },
-          { id: "Bad Action", label: "Bad action", from: "queued", to: "running" },
+          { id: "start", label: "Duplicate start", from: "queued", to: "running", trigger: "user", visible: true },
+          { id: "Bad Action", label: "Bad action", from: "queued", to: "running", trigger: "user", visible: true },
         ],
       },
       stateMachine,
@@ -105,8 +106,8 @@ describe("workflow definition validation", () => {
         ...workflow,
         buckets: [
           ...workflow.buckets,
-          { id: "waiting", label: "Duplicate waiting", states: [] },
-          { id: "Bad Bucket", label: "Bad bucket", states: [] },
+          { id: "waiting", label: "Duplicate waiting", visible: true, states: [] },
+          { id: "Bad Bucket", label: "Bad bucket", visible: true, states: [] },
         ],
       },
       stateMachine,
@@ -121,7 +122,7 @@ describe("workflow definition validation", () => {
     const result = validateWorkflowDefinition(
       {
         ...workflow,
-        buckets: [{ id: "waiting", label: "", states: stateMachine.states }],
+        buckets: [{ id: "waiting", label: "", visible: true, states: stateMachine.states }],
       },
       stateMachine,
     );
@@ -133,7 +134,7 @@ describe("workflow definition validation", () => {
     const result = validateWorkflowDefinition(
       {
         ...workflow,
-        buckets: [{ id: "workflow", label: "Workflow", states: [...stateMachine.states, "archived"] }],
+        buckets: [{ id: "workflow", label: "Workflow", visible: true, states: [...stateMachine.states, "archived"] }],
       },
       stateMachine,
     );
@@ -146,8 +147,8 @@ describe("workflow definition validation", () => {
       {
         ...workflow,
         buckets: [
-          { id: "waiting", label: "Waiting", states: ["queued", "running", "completed", "failed", "cancelled"] },
-          { id: "also_waiting", label: "Also waiting", states: ["queued"] },
+          { id: "waiting", label: "Waiting", visible: true, states: ["queued", "running", "completed", "failed", "cancelled"] },
+          { id: "also_waiting", label: "Also waiting", visible: true, states: ["queued"] },
         ],
       },
       stateMachine,
@@ -160,7 +161,7 @@ describe("workflow definition validation", () => {
     const result = validateWorkflowDefinition(
       {
         ...workflow,
-        buckets: [{ id: "waiting", label: "Waiting", states: ["queued"] }],
+        buckets: [{ id: "waiting", label: "Waiting", visible: true, states: ["queued"] }],
       },
       stateMachine,
     );
@@ -172,7 +173,7 @@ describe("workflow definition validation", () => {
     const result = validateWorkflowDefinition(
       {
         ...workflow,
-        actions: [{ id: "archive", label: "Archive", from: "queued", to: "archived" }],
+        actions: [{ id: "archive", label: "Archive", from: "queued", to: "archived", trigger: "user", visible: true }],
       },
       stateMachine,
     );
@@ -184,7 +185,7 @@ describe("workflow definition validation", () => {
     const result = validateWorkflowDefinition(
       {
         ...workflow,
-        actions: [{ id: "skip", label: "Skip", from: "queued", to: "completed" }],
+        actions: [{ id: "skip", label: "Skip", from: "queued", to: "completed", trigger: "user", visible: true }],
       },
       stateMachine,
     );
@@ -196,7 +197,7 @@ describe("workflow definition validation", () => {
     const result = validateWorkflowDefinition(
       {
         ...workflow,
-        actions: [{ id: "restart", label: "Restart", from: "completed", to: "queued" }],
+        actions: [{ id: "restart", label: "Restart", from: "completed", to: "queued", trigger: "user", visible: true }],
       },
       stateMachine,
     );
@@ -229,6 +230,81 @@ describe("workflow definition validation", () => {
 
     expect(result.errors.map((error) => error.code)).toContain("state_machine_reference_mismatch");
   });
+
+  it("rejects duplicate, unknown, and missing workflow state presentation metadata", () => {
+    const result = validateWorkflowDefinition(
+      {
+        ...workflow,
+        states: [
+          { id: "queued", visible: true },
+          { id: "queued", visible: false },
+          { id: "archived", visible: true },
+        ],
+      },
+      stateMachine,
+    );
+
+    expect(result.errors.map((error) => error.code)).toEqual(
+      expect.arrayContaining(["duplicate_workflow_state", "unknown_workflow_state", "missing_workflow_state"]),
+    );
+  });
+
+  it("rejects hidden user actions and visible automatic actions", () => {
+    const result = validateWorkflowDefinition(
+      {
+        ...workflow,
+        actions: [
+          { id: "hidden_user", label: "Hidden User", from: "queued", to: "running", trigger: "user", visible: false },
+          { id: "visible_auto", label: "Visible Auto", from: "queued", to: "running", trigger: "automatic", visible: true },
+        ],
+      },
+      stateMachine,
+    );
+
+    expect(result.errors.map((error) => error.code)).toEqual(
+      expect.arrayContaining(["hidden_user_action", "visible_automatic_action"]),
+    );
+  });
+
+  it("rejects user actions from hidden workflow states or hidden buckets", () => {
+    const hiddenStateResult = validateWorkflowDefinition(
+      {
+        ...workflow,
+        states: workflow.states.map((state) => (state.id === "queued" ? { ...state, visible: false } : state)),
+      },
+      stateMachine,
+    );
+    const hiddenBucketResult = validateWorkflowDefinition(
+      {
+        ...workflow,
+        buckets: workflow.buckets.map((bucket) => (bucket.id === "waiting" ? { ...bucket, visible: false } : bucket)),
+      },
+      stateMachine,
+    );
+
+    expect(hiddenStateResult.errors.map((error) => error.code)).toContain("hidden_user_action_state");
+    expect(hiddenBucketResult.errors.map((error) => error.code)).toContain("hidden_user_action_state");
+  });
+
+  it("accepts valid handler keys and rejects app-specific handler names that are not string identifiers", () => {
+    const validResult = validateWorkflowDefinition(
+      {
+        ...workflow,
+        actions: [{ ...workflow.actions[0], processing: { handlerKey: "publish_photo" } }],
+      },
+      stateMachine,
+    );
+    const invalidResult = validateWorkflowDefinition(
+      {
+        ...workflow,
+        actions: [{ ...workflow.actions[0], processing: { handlerKey: "Publish Photo" } }],
+      },
+      stateMachine,
+    );
+
+    expect(validResult.valid).toBe(true);
+    expect(invalidResult.errors.map((error) => error.code)).toContain("invalid_handler_key");
+  });
 });
 
 describe("workflow runtime helpers", () => {
@@ -238,5 +314,6 @@ describe("workflow runtime helpers", () => {
     expect(getAllowedActions(definedWorkflow, "queued").map((action) => action.id)).toEqual(["start"]);
     expect(getActionTargetState(definedWorkflow, "complete")).toBe("completed");
     expect(definedWorkflow.bucketsByState.get("queued")?.id).toBe("waiting");
+    expect(definedWorkflow.statePresentationByState.get("queued")?.visible).toBe(true);
   });
 });

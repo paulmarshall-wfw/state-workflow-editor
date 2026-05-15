@@ -127,7 +127,7 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "State Machine" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Workflow" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Target Project")).toHaveValue("Example Project");
+    expect(screen.getByLabelText("Target App")).toHaveValue("Example Project");
     expect(screen.getByLabelText("State Machine Version")).toHaveValue("0.1.0");
     expect(screen.getByText("Valid")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "State machine Mermaid preview" })).toBeInTheDocument();
@@ -171,13 +171,17 @@ describe("App", () => {
       transitions: [{ from: "queued", to: "running" }],
     } as const;
     const workflow = {
-      schemaVersion: "0.2.0",
+      schemaVersion: "0.3.0",
       appName: "Example Project",
       workflowVersion: "0.1.0",
       id: "scan_job_workflow",
       stateMachine: { id: "scan_job_state", definitionVersion: "0.1.0" },
-      actions: [{ id: "start", label: "Start", from: "queued", to: "running" }],
-      buckets: [{ id: "workflow", label: "Workflow", states: ["queued", "running"] }],
+      states: [
+        { id: "queued", visible: true },
+        { id: "running", visible: true },
+      ],
+      actions: [{ id: "start", label: "Start", from: "queued", to: "running", trigger: "user", visible: true }],
+      buckets: [{ id: "workflow", label: "Workflow", visible: true, states: ["queued", "running"] }],
     } as const;
 
     expect(buildWorkflowMermaidDiagram(definition, workflow)).toContain("queued -->|start| running");
@@ -204,7 +208,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.clear(screen.getByLabelText("Target Project"));
+    await user.clear(screen.getByLabelText("Target App"));
     await user.clear(screen.getByLabelText("State Machine Version"));
     await user.type(screen.getByLabelText("State Machine Version"), "draft");
 
@@ -301,7 +305,7 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("State Machine ID")).toHaveValue("article_state");
     });
-    expect(screen.getByLabelText("Target Project")).toHaveValue("Article Manager");
+    expect(screen.getByLabelText("Target App")).toHaveValue("Article Manager");
     expect(screen.getByLabelText("State Machine Version")).toHaveValue("1.2.3");
     expect(screen.getByRole("textbox", { name: "State 1 ID" })).toHaveValue("draft");
     expect(screen.getByText("Valid")).toBeInTheDocument();
@@ -382,7 +386,7 @@ describe("App", () => {
     expect(close).toHaveBeenCalled();
   });
 
-  it("uses package.json name from the folder picker for both target project fields", async () => {
+  it("uses package.json name from the folder picker for both target app fields", async () => {
     const user = userEvent.setup();
     const showDirectoryPicker = vi.fn().mockResolvedValue(
       createProjectDirectoryHandle("Display Folder", {
@@ -398,16 +402,16 @@ describe("App", () => {
 
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Choose project folder" }));
+    await user.click(screen.getByRole("button", { name: "Choose app folder" }));
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Target Project")).toHaveValue("state-workflow-engine");
+      expect(screen.getByLabelText("Target App")).toHaveValue("state-workflow-engine");
     });
-    expect(screen.getByText('Selected project "state-workflow-engine" from package.json.')).toBeInTheDocument();
+    expect(screen.getByText('Selected app "state-workflow-engine" from package.json.')).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Workflow" }));
 
-    expect(screen.getByLabelText("Target Project")).toHaveValue("state-workflow-engine");
+    expect(screen.getByLabelText("Target App")).toHaveValue("state-workflow-engine");
   });
 
   it("strips package scope when choosing a scoped package project folder", async () => {
@@ -426,10 +430,10 @@ describe("App", () => {
 
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Choose project folder" }));
+    await user.click(screen.getByRole("button", { name: "Choose app folder" }));
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Target Project")).toHaveValue("state-workflow-engine");
+      expect(screen.getByLabelText("Target App")).toHaveValue("state-workflow-engine");
     });
   });
 
@@ -445,12 +449,12 @@ describe("App", () => {
 
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Choose project folder" }));
+    await user.click(screen.getByRole("button", { name: "Choose app folder" }));
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Target Project")).toHaveValue("selected-project");
+      expect(screen.getByLabelText("Target App")).toHaveValue("selected-project");
     });
-    expect(screen.getByText('Selected project "selected-project" from selected folder.')).toBeInTheDocument();
+    expect(screen.getByText('Selected app "selected-project" from selected folder.')).toBeInTheDocument();
   });
 
   it("uses .app-dashboard.json only when its name is slug-like", async () => {
@@ -476,22 +480,22 @@ describe("App", () => {
 
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Choose project folder" }));
+    await user.click(screen.getByRole("button", { name: "Choose app folder" }));
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Target Project")).toHaveValue("dashboard-project");
+      expect(screen.getByLabelText("Target App")).toHaveValue("dashboard-project");
     });
-    expect(screen.getByText('Selected project "dashboard-project" from .app-dashboard.json.')).toBeInTheDocument();
+    expect(screen.getByText('Selected app "dashboard-project" from .app-dashboard.json.')).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Choose project folder" }));
+    await user.click(screen.getByRole("button", { name: "Choose app folder" }));
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Target Project")).toHaveValue("another-folder");
+      expect(screen.getByLabelText("Target App")).toHaveValue("another-folder");
     });
-    expect(screen.getByText('Selected project "another-folder" from selected folder.')).toBeInTheDocument();
+    expect(screen.getByText('Selected app "another-folder" from selected folder.')).toBeInTheDocument();
   });
 
-  it("keeps existing target project values when folder picking is unsupported or cancelled", async () => {
+  it("keeps existing target app values when folder picking is unsupported or cancelled", async () => {
     const user = userEvent.setup();
 
     delete (
@@ -502,11 +506,11 @@ describe("App", () => {
 
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Choose project folder" }));
+    await user.click(screen.getByRole("button", { name: "Choose app folder" }));
 
-    expect(screen.getByLabelText("Target Project")).toHaveValue("Example Project");
+    expect(screen.getByLabelText("Target App")).toHaveValue("Example Project");
     expect(
-      screen.getByText("Folder picker is not supported in this browser. Type the target project name manually."),
+      screen.getByText("Folder picker is not supported in this browser. Type the target app name manually."),
     ).toBeInTheDocument();
 
     const showDirectoryPicker = vi.fn().mockRejectedValue(new DOMException("Cancelled", "AbortError"));
@@ -517,10 +521,10 @@ describe("App", () => {
       }
     ).showDirectoryPicker = showDirectoryPicker;
 
-    await user.click(screen.getByRole("button", { name: "Choose project folder" }));
+    await user.click(screen.getByRole("button", { name: "Choose app folder" }));
 
-    expect(screen.getByLabelText("Target Project")).toHaveValue("Example Project");
-    expect(screen.getByText("Project selection cancelled.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Target App")).toHaveValue("Example Project");
+    expect(screen.getByText("App selection cancelled.")).toBeInTheDocument();
   });
 
   it("falls back to browser download when save picker is unavailable", async () => {
@@ -753,6 +757,57 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Export Bundled Workflow" })).toBeDisabled();
   });
 
+  it("edits workflow action trigger visibility and handler metadata with validation", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+
+    expect(screen.getByLabelText("Action 1 trigger")).toHaveValue("user");
+    expect(screen.getByLabelText("Action 1 visible")).toBeChecked();
+    expect(screen.getByLabelText("Action 1 handler key")).toHaveValue("");
+
+    await user.selectOptions(screen.getByLabelText("Action 1 trigger"), "automatic");
+
+    expect(screen.getByLabelText("Action 1 visible")).not.toBeChecked();
+
+    await user.click(screen.getByLabelText("Action 1 visible"));
+
+    expect(screen.getByText('Automatic action "start" must be hidden from user controls.')).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeDisabled();
+
+    await user.click(screen.getByLabelText("Action 1 visible"));
+    await user.type(screen.getByLabelText("Action 1 handler key"), "Publish Photo");
+
+    expect(screen.getByText('Action "start" processing handler key must use lowercase letters, numbers, and underscores.')).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeDisabled();
+
+    await user.clear(screen.getByLabelText("Action 1 handler key"));
+    await user.type(screen.getByLabelText("Action 1 handler key"), "publish_photo");
+
+    expect(screen.queryByText(/processing handler key/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeEnabled();
+  });
+
+  it("validates user actions against workflow bucket and state visibility", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Buckets" }));
+
+    await user.click(screen.getByLabelText("Bucket 1 visible"));
+
+    expect(screen.getByText('User-triggered action "start" must start from a state in a visible state and bucket.')).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeDisabled();
+
+    await user.click(screen.getByLabelText("Bucket 1 visible"));
+    await user.click(screen.getByLabelText("queued visible"));
+
+    expect(screen.getByText('User-triggered action "start" must start from a state in a visible state and bucket.')).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeDisabled();
+  });
+
   it("exports linked and bundled workflow definitions", async () => {
     const user = userEvent.setup();
     const write = vi.fn().mockResolvedValue(undefined);
@@ -794,7 +849,14 @@ describe("App", () => {
     const linkedExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
     const bundledExport = JSON.parse(await readBlobText(write.mock.calls[1][0] as Blob));
 
-    expect(linkedExport.schemaVersion).toBe("0.2.0");
+    expect(linkedExport.schemaVersion).toBe("0.3.0");
+    expect(linkedExport.states).toEqual([
+      { id: "queued", visible: true },
+      { id: "running", visible: true },
+      { id: "completed", visible: true },
+      { id: "failed", visible: true },
+      { id: "cancelled", visible: true },
+    ]);
     expect(linkedExport.actions.map((action: { id: string }) => action.id)).toEqual([
       "cancel_queued",
       "complete",
@@ -803,10 +865,11 @@ describe("App", () => {
       "start",
       "cancel_running",
     ]);
+    expect(linkedExport.actions[0]).toMatchObject({ trigger: "user", visible: true });
     expect(linkedExport.buckets).toEqual([
-      { id: "finished", label: "Finished", states: ["completed", "cancelled"] },
-      { id: "waiting", label: "Waiting", states: ["queued"] },
-      { id: "active", label: "Active", states: ["running", "failed"] },
+      { id: "finished", label: "Finished", visible: true, states: ["completed", "cancelled"] },
+      { id: "waiting", label: "Waiting", visible: true, states: ["queued"] },
+      { id: "active", label: "Active", visible: true, states: ["running", "failed"] },
     ]);
     expect(bundledExport.actions).toEqual(linkedExport.actions);
     expect(bundledExport.buckets).toEqual(linkedExport.buckets);
@@ -839,10 +902,13 @@ describe("App", () => {
       expect(screen.getByLabelText("Workflow ID")).toHaveValue("article_workflow");
     });
     expect(screen.getByLabelText("Workflow Version")).toHaveValue("1.0.0");
+    expect(screen.getByLabelText("Action 1 trigger")).toHaveValue("user");
+    expect(screen.getByLabelText("Action 1 visible")).toBeChecked();
     expect(screen.getByRole("button", { name: "Export Workflow" })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Buckets" }));
     expect(screen.getByRole("textbox", { name: "Bucket 1 label" })).toHaveValue("Workflow");
+    expect(screen.getByLabelText("Bucket 1 visible")).toBeChecked();
     const mappingPanel = screen.getByRole("heading", { name: "State Mapping" }).closest("section") as HTMLElement;
     expect(within(mappingPanel).getByText("queued")).toBeInTheDocument();
   });

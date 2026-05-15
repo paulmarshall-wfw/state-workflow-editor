@@ -7,7 +7,7 @@ import {
   validateStateMachineDefinition,
 } from "./stateMachine";
 
-export const WORKFLOW_SCHEMA_VERSION = "0.2.0" as const;
+export const WORKFLOW_SCHEMA_VERSION = "0.3.0" as const;
 
 export type WorkflowSchemaVersion = typeof WORKFLOW_SCHEMA_VERSION;
 
@@ -16,17 +16,32 @@ export type WorkflowStateMachineReference = {
   definitionVersion: string;
 };
 
+export type WorkflowActionTrigger = "user" | "automatic";
+
+export type WorkflowActionProcessing = {
+  handlerKey: string;
+};
+
 export type WorkflowAction<State extends string = string> = {
   id: string;
   label: string;
   from: State;
   to: State;
+  trigger: WorkflowActionTrigger;
+  visible: boolean;
+  processing?: WorkflowActionProcessing;
 };
 
 export type WorkflowBucket<State extends string = string> = {
   id: string;
   label: string;
+  visible: boolean;
   states: readonly State[];
+};
+
+export type WorkflowStatePresentation<State extends string = string> = {
+  id: State;
+  visible: boolean;
 };
 
 export type WorkflowDefinition<State extends string = string> = {
@@ -36,6 +51,7 @@ export type WorkflowDefinition<State extends string = string> = {
   id: string;
   stateMachine: WorkflowStateMachineReference;
   embeddedStateMachineDefinition?: StateMachineDefinition<State>;
+  states: readonly WorkflowStatePresentation<State>[];
   actions: readonly WorkflowAction<State>[];
   buckets: readonly WorkflowBucket<State>[];
 };
@@ -56,6 +72,14 @@ export type WorkflowValidationCode =
   | "unknown_action_state"
   | "illegal_action_transition"
   | "terminal_state_has_action"
+  | "invalid_action_trigger"
+  | "visible_automatic_action"
+  | "hidden_user_action"
+  | "hidden_user_action_state"
+  | "invalid_handler_key"
+  | "duplicate_workflow_state"
+  | "unknown_workflow_state"
+  | "missing_workflow_state"
   | "invalid_bucket_id"
   | "duplicate_bucket"
   | "missing_bucket_label"
@@ -80,6 +104,7 @@ export type DefinedWorkflow<State extends string = string> = {
   actionsByState: ReadonlyMap<State, readonly WorkflowAction<State>[]>;
   actionTargets: ReadonlyMap<string, State>;
   bucketsByState: ReadonlyMap<State, WorkflowBucket<State>>;
+  statePresentationByState: ReadonlyMap<State, WorkflowStatePresentation<State>>;
 };
 
 export class WorkflowDefinitionError extends Error {
@@ -99,6 +124,7 @@ export function validateWorkflowDefinition<State extends string>(
   const errors: WorkflowValidationError[] = [];
   const actionCounts = countValues(workflow.actions.map((action) => action.id));
   const bucketCounts = countValues(workflow.buckets.map((bucket) => bucket.id));
+  const workflowStateCounts = countValues(workflow.states.map((state) => state.id));
   const embeddedStateMachine = workflow.embeddedStateMachineDefinition;
   const effectiveStateMachine = embeddedStateMachine ?? stateMachineDefinition;
 
@@ -195,6 +221,16 @@ export function validateWorkflowDefinition<State extends string>(
     }
   }
 
+  for (const [stateId, count] of workflowStateCounts) {
+    if (count > 1) {
+      errors.push({
+        code: "duplicate_workflow_state",
+        message: `Workflow state metadata for "${stateId}" is defined more than once.`,
+        path: "states",
+      });
+    }
+  }
+
   if (!effectiveStateMachine) {
     return { valid: errors.length === 0, errors };
   }
@@ -206,6 +242,38 @@ export function validateWorkflowDefinition<State extends string>(
   } catch {
     return { valid: errors.length === 0, errors };
   }
+
+  const stateVisibility = new Map<State, boolean>();
+  const visibleBucketsByState = new Map<State, boolean>();
+
+  workflow.states.forEach((state, index) => {
+    if (!machine?.states.has(state.id)) {
+      errors.push({
+        code: "unknown_workflow_state",
+        message: `Workflow state metadata references unknown state "${state.id}".`,
+        path: `states.${index}.id`,
+      });
+      return;
+    }
+
+    stateVisibility.set(state.id, state.visible);
+  });
+
+  for (const state of machine.definition.states) {
+    if (!stateVisibility.has(state)) {
+      errors.push({
+        code: "missing_workflow_state",
+        message: `Workflow state metadata must include state "${state}".`,
+        path: "states",
+      });
+    }
+  }
+
+  workflow.buckets.forEach((bucket) => {
+    bucket.states.forEach((state) => {
+      visibleBucketsByState.set(state, bucket.visible);
+    });
+  });
 
   workflow.actions.forEach((action, index) => {
     if (!isValidWorkflowId(action.id)) {
@@ -224,6 +292,38 @@ export function validateWorkflowDefinition<State extends string>(
       });
     }
 
+    if (action.trigger !== "user" && action.trigger !== "automatic") {
+      errors.push({
+        code: "invalid_action_trigger",
+        message: `Action "${action.id}" trigger must be "user" or "automatic".`,
+        path: `actions.${index}.trigger`,
+      });
+    }
+
+    if (action.trigger === "user" && !action.visible) {
+      errors.push({
+        code: "hidden_user_action",
+        message: `User-triggered action "${action.id}" must be visible.`,
+        path: `actions.${index}.visible`,
+      });
+    }
+
+    if (action.trigger === "automatic" && action.visible) {
+      errors.push({
+        code: "visible_automatic_action",
+        message: `Automatic action "${action.id}" must be hidden from user controls.`,
+        path: `actions.${index}.visible`,
+      });
+    }
+
+    if (action.processing?.handlerKey && !isValidWorkflowId(action.processing.handlerKey)) {
+      errors.push({
+        code: "invalid_handler_key",
+        message: `Action "${action.id}" processing handler key must use lowercase letters, numbers, and underscores.`,
+        path: `actions.${index}.processing.handlerKey`,
+      });
+    }
+
     if (!machine?.states.has(action.from) || !machine.states.has(action.to)) {
       errors.push({
         code: "unknown_action_state",
@@ -231,6 +331,14 @@ export function validateWorkflowDefinition<State extends string>(
         path: `actions.${index}`,
       });
       return;
+    }
+
+    if (action.trigger === "user" && (!stateVisibility.get(action.from) || !visibleBucketsByState.get(action.from))) {
+      errors.push({
+        code: "hidden_user_action_state",
+        message: `User-triggered action "${action.id}" must start from a state in a visible state and bucket.`,
+        path: `actions.${index}.from`,
+      });
     }
 
     if (isTerminalState(machine, action.from)) {
@@ -335,13 +443,14 @@ export function defineWorkflow<State extends string>(
   const actionsByState = new Map<State, WorkflowAction<State>[]>();
   const actionTargets = new Map<string, State>();
   const bucketsByState = new Map<State, WorkflowBucket<State>>();
+  const statePresentationByState = new Map<State, WorkflowStatePresentation<State>>();
 
   for (const state of stateMachine.definition.states) {
     actionsByState.set(state, []);
   }
 
   for (const action of workflow.actions) {
-    actionsByState.get(action.from)?.push({ ...action });
+    actionsByState.get(action.from)?.push(copyAction(action));
     actionTargets.set(action.id, action.to);
   }
 
@@ -351,6 +460,10 @@ export function defineWorkflow<State extends string>(
     for (const state of bucket.states) {
       bucketsByState.set(state, copiedBucket);
     }
+  }
+
+  for (const state of workflow.states) {
+    statePresentationByState.set(state.id, { ...state });
   }
 
   return {
@@ -368,13 +481,15 @@ export function defineWorkflow<State extends string>(
             transitions: workflow.embeddedStateMachineDefinition.transitions.map((transition) => ({ ...transition })),
           }
         : undefined,
-      actions: workflow.actions.map((action) => ({ ...action })),
+      states: workflow.states.map((state) => ({ ...state })),
+      actions: workflow.actions.map(copyAction),
       buckets: workflow.buckets.map((bucket) => ({ ...bucket, states: [...bucket.states] })),
     },
     stateMachine,
     actionsByState,
     actionTargets,
     bucketsByState,
+    statePresentationByState,
   };
 }
 
@@ -408,6 +523,13 @@ function countValues(values: readonly string[]): Map<string, number> {
   }
 
   return counts;
+}
+
+function copyAction<State extends string>(action: WorkflowAction<State>): WorkflowAction<State> {
+  return {
+    ...action,
+    processing: action.processing ? { ...action.processing } : undefined,
+  };
 }
 
 function isValidWorkflowId(actionId: string): boolean {
