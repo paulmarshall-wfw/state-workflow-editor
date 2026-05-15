@@ -63,6 +63,27 @@ function createDragDataTransfer() {
   } as unknown as DataTransfer;
 }
 
+function createFileDataTransfer(file: File) {
+  return {
+    dropEffect: "copy",
+    effectAllowed: "copy",
+    files: [file],
+    types: ["Files"],
+    setData: vi.fn(),
+    getData: vi.fn(),
+  } as unknown as DataTransfer;
+}
+
+function createTextFile(contents: string, name: string, type = "application/json") {
+  const file = new File([contents], name, { type });
+
+  Object.defineProperty(file, "text", {
+    value: async () => contents,
+  });
+
+  return file;
+}
+
 function getStateInputValues() {
   return screen
     .getAllByRole("textbox", { name: /^State \d+ ID$/ })
@@ -309,6 +330,154 @@ describe("App", () => {
     expect(screen.getByLabelText("State Machine Version")).toHaveValue("1.2.3");
     expect(screen.getByRole("textbox", { name: "State 1 ID" })).toHaveValue("draft");
     expect(screen.getByText("Valid")).toBeInTheDocument();
+  });
+
+  it("shows the state-machine import drop zone only on the State Machine page", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(screen.getByRole("button", { name: /State Machine JSON/ })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+
+    expect(screen.queryByRole("button", { name: /State Machine JSON/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(screen.queryByRole("button", { name: /State Machine JSON/ })).not.toBeInTheDocument();
+  });
+
+  it("imports a valid state-machine JSON file from the drop zone", async () => {
+    render(<App />);
+
+    const json = JSON.stringify({
+      schemaVersion: "0.2.0",
+      appName: "Article Manager",
+      definitionVersion: "1.2.3",
+      id: "article_state",
+      states: ["draft", "review", "published"],
+      terminalStates: ["published"],
+      transitions: [
+        { from: "draft", to: "review" },
+        { from: "review", to: "published" },
+      ],
+    });
+    const file = createTextFile(json, "article-state.json", "");
+    const dataTransfer = createFileDataTransfer(file);
+    const dropZone = screen.getByRole("button", { name: /State Machine JSON/ });
+
+    fireEvent.dragEnter(dropZone, { dataTransfer });
+    fireEvent.dragOver(dropZone, { dataTransfer });
+    fireEvent.drop(dropZone, { dataTransfer });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("State Machine ID")).toHaveValue("article_state");
+    });
+    expect(screen.getByLabelText("Target App")).toHaveValue("Article Manager");
+    expect(screen.getByLabelText("State Machine Version")).toHaveValue("1.2.3");
+    expect(getStateInputValues()).toEqual(["draft", "review", "published"]);
+    expect(screen.getByRole("button", { name: "draft" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Valid")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "State machine Mermaid preview" })).toBeInTheDocument();
+  });
+
+  it("opens the existing state-machine file input from the drop zone and imports through it", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const input = screen.getByLabelText("Import state machine JSON definition") as HTMLInputElement;
+    const inputClick = vi.spyOn(input, "click").mockImplementation(() => undefined);
+    const json = JSON.stringify({
+      schemaVersion: "0.2.0",
+      appName: "Review Desk",
+      definitionVersion: "2.0.0",
+      id: "review_state",
+      states: ["new", "done"],
+      terminalStates: ["done"],
+      transitions: [{ from: "new", to: "done" }],
+    });
+
+    await user.click(screen.getByRole("button", { name: /State Machine JSON/ }));
+
+    expect(inputClick).toHaveBeenCalled();
+
+    inputClick.mockClear();
+    screen.getByRole("button", { name: /State Machine JSON/ }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(inputClick).toHaveBeenCalled();
+
+    fireEvent.change(input, {
+      target: { files: [createTextFile(json, "review-state.json", "application/json")] },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("State Machine ID")).toHaveValue("review_state");
+    });
+    expect(screen.getByLabelText("Target App")).toHaveValue("Review Desk");
+    expect(screen.getByRole("button", { name: "new" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("rejects invalid JSON from the drop zone without replacing the current definition", async () => {
+    render(<App />);
+
+    await screen.findByTestId("mock-mermaid-svg");
+
+    const dataTransfer = createFileDataTransfer(createTextFile("{", "broken-state.json", "application/json"));
+    const dropZone = screen.getByRole("button", { name: /State Machine JSON/ });
+
+    fireEvent.drop(dropZone, { dataTransfer });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Invalid JSON/)).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText("Target App")).toHaveValue("Example Project");
+    expect(screen.getByLabelText("State Machine ID")).toHaveValue("scan_job_state");
+    expect(getStateInputValues()).toEqual(["queued", "running", "completed", "failed", "cancelled"]);
+  });
+
+  it("rejects invalid state-machine definitions from the drop zone without replacing the current definition", async () => {
+    render(<App />);
+
+    await screen.findByTestId("mock-mermaid-svg");
+
+    const json = JSON.stringify({
+      schemaVersion: "0.2.0",
+      appName: "Broken Manager",
+      definitionVersion: "1.0.0",
+      id: "broken_state",
+      states: ["draft", "draft"],
+      terminalStates: [],
+      transitions: [],
+    });
+    const dataTransfer = createFileDataTransfer(createTextFile(json, "broken-state.json", "application/json"));
+    const dropZone = screen.getByRole("button", { name: /State Machine JSON/ });
+
+    fireEvent.drop(dropZone, { dataTransfer });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Invalid state-machine definition/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/State "draft" is defined more than once/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Target App")).toHaveValue("Example Project");
+    expect(screen.getByLabelText("State Machine ID")).toHaveValue("scan_job_state");
+    expect(getStateInputValues()).toEqual(["queued", "running", "completed", "failed", "cancelled"]);
+  });
+
+  it("rejects non-JSON dropped files without replacing the current definition", async () => {
+    render(<App />);
+
+    await screen.findByTestId("mock-mermaid-svg");
+
+    const dataTransfer = createFileDataTransfer(createTextFile("not json", "state-machine.txt", "text/plain"));
+    const dropZone = screen.getByRole("button", { name: /State Machine JSON/ });
+
+    fireEvent.drop(dropZone, { dataTransfer });
+
+    expect(screen.getByText("Unsupported file type. Choose a .json state-machine definition file.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Target App")).toHaveValue("Example Project");
+    expect(screen.getByLabelText("State Machine ID")).toHaveValue("scan_job_state");
+    expect(getStateInputValues()).toEqual(["queued", "running", "completed", "failed", "cancelled"]);
   });
 
   it("persists the configurable app logo URL from settings", async () => {

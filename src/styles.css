@@ -213,9 +213,16 @@ button:focus-visible {
 
 .fixed-control-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(360px, 0.9fr);
   gap: 12px;
   min-height: 0;
+}
+
+.state-machine-control-grid {
+  grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.62fr) minmax(360px, 0.9fr);
+}
+
+.workflow-control-grid {
+  grid-template-columns: minmax(0, 1.55fr) minmax(360px, 0.9fr);
 }
 
 .workspace-grid {
@@ -296,6 +303,48 @@ button:focus-visible {
   border-bottom: 0;
   border-radius: 3px 3px 0 0;
   content: "";
+}
+
+.import-panel {
+  display: grid;
+  padding: 8px;
+}
+
+.import-drop-zone {
+  display: grid;
+  width: 100%;
+  min-height: 100%;
+  place-items: center;
+  gap: 4px;
+  border: 1px dashed var(--border);
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  padding: 12px;
+  text-align: center;
+}
+
+.import-drop-zone:hover,
+.import-drop-zone:focus-visible,
+.import-drop-zone.dragging-file {
+  border-color: var(--accent);
+  background: var(--surface-bg);
+  color: var(--accent-strong);
+}
+
+.import-drop-zone-title,
+.import-drop-zone-detail {
+  display: block;
+}
+
+.import-drop-zone-title {
+  font-size: 0.93rem;
+  font-weight: 900;
+}
+
+.import-drop-zone-detail {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 800;
 }
 
 .machine-panel label,

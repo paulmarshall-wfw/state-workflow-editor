@@ -663,12 +663,25 @@ export function App() {
     }
 
     try {
+      await importStateMachineFile(file);
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  async function importStateMachineFile(file: File) {
+    if (!isJsonFile(file)) {
+      setStateMachineMessage("Unsupported file type. Choose a .json state-machine definition file.");
+      return;
+    }
+
+    try {
       const parsed = JSON.parse(await file.text()) as EditableDefinition;
       const nextDefinition = normalizeImportedDefinition(parsed);
       const result = validateStateMachineDefinition(nextDefinition);
 
       if (!result.valid) {
-        setStateMachineMessage(result.errors.map((error) => error.message).join(" "));
+        setStateMachineMessage(`Invalid state-machine definition: ${result.errors.map((error) => error.message).join(" ")}`);
         return;
       }
 
@@ -676,9 +689,8 @@ export function App() {
       setSelectedState(nextDefinition.states[0] ?? "");
       setStateMachineMessage(null);
     } catch (error) {
-      setStateMachineMessage(error instanceof Error ? error.message : "Unable to import state machine definition.");
-    } finally {
-      event.target.value = "";
+      const detail = error instanceof Error ? error.message : "Unable to parse the selected file.";
+      setStateMachineMessage(`Invalid JSON. Choose a valid state-machine .json file. ${detail}`);
     }
   }
 
@@ -804,7 +816,7 @@ export function App() {
 
       {activePage === "state-machine" ? (
         <>
-          <section className="fixed-control-grid">
+          <section className="fixed-control-grid state-machine-control-grid">
             <section className="panel machine-panel">
               <div className="metadata-field">
                 <label htmlFor="app-name">Target App</label>
@@ -837,6 +849,11 @@ export function App() {
                 />
               </div>
             </section>
+
+            <StateMachineImportDropZone
+              onChooseFile={() => stateMachineFileInputRef.current?.click()}
+              onImportFile={importStateMachineFile}
+            />
 
             <section className="panel status-panel" aria-live="polite">
               <div className="panel-heading">
@@ -929,7 +946,7 @@ export function App() {
 
       {activePage === "workflow" ? (
         <>
-          <section className="fixed-control-grid">
+          <section className="fixed-control-grid workflow-control-grid">
             <section className="panel machine-panel workflow-metadata-panel">
               <div className="metadata-field">
                 <label htmlFor="workflow-app-name">Target App</label>
@@ -1201,6 +1218,67 @@ function SettingsPage({
           />
         </div>
       </section>
+    </section>
+  );
+}
+
+function StateMachineImportDropZone({
+  onChooseFile,
+  onImportFile,
+}: {
+  onChooseFile: () => void;
+  onImportFile: (file: File) => Promise<void>;
+}) {
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+
+  function showFileDrop(event: DragEvent<HTMLButtonElement>) {
+    if (!hasExternalFiles(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDraggingFile(true);
+  }
+
+  function hideFileDrop() {
+    setIsDraggingFile(false);
+  }
+
+  async function dropFile(event: DragEvent<HTMLButtonElement>) {
+    if (!hasExternalFiles(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsDraggingFile(false);
+
+    const file = event.dataTransfer.files?.[0];
+
+    if (file) {
+      await onImportFile(file);
+    }
+  }
+
+  return (
+    <section className="panel import-panel" aria-labelledby="state-machine-import-title">
+      <button
+        type="button"
+        className={isDraggingFile ? "import-drop-zone dragging-file" : "import-drop-zone"}
+        onClick={onChooseFile}
+        onDragEnter={showFileDrop}
+        onDragOver={showFileDrop}
+        onDragLeave={hideFileDrop}
+        onDrop={dropFile}
+        aria-describedby="state-machine-import-detail"
+      >
+        <span id="state-machine-import-title" className="import-drop-zone-title">
+          State Machine JSON
+        </span>
+        <span id="state-machine-import-detail" className="import-drop-zone-detail">
+          Drop or choose a .json file
+        </span>
+      </button>
     </section>
   );
 }
@@ -2120,6 +2198,14 @@ function normalizeImportedDefinition(value: Partial<EditableDefinition>): Editab
     terminalStates: Array.isArray(value.terminalStates) ? value.terminalStates : [],
     transitions: Array.isArray(value.transitions) ? value.transitions : [],
   };
+}
+
+function isJsonFile(file: File) {
+  return file.type.toLowerCase() === "application/json" || file.name.toLowerCase().endsWith(".json");
+}
+
+function hasExternalFiles(dataTransfer: DataTransfer) {
+  return Array.from(dataTransfer.types).includes("Files") || dataTransfer.files.length > 0;
 }
 
 type ImportedWorkflowDefinition = Partial<Omit<EditableWorkflowDefinition, "schemaVersion" | "states" | "actions" | "buckets">> & {
