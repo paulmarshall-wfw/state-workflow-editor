@@ -4,17 +4,17 @@
 
 - project name: State Workflow Editor
 - handoff type: implementation checkpoint
-- created timestamp in UTC: 2026-05-15T01:12:22Z
+- created timestamp in UTC: 2026-05-15T03:23:29Z
 - prepared by: Codex
 - repository, workspace, or folder: `/Users/paulmarshall/Software Development/state-workflow-engine`
 - branch or working context: `main`
-- session scope: State Workflow Editor expansion, app/package version bump to `0.0.2`, and committed checkpoint refresh
+- session scope: Workflow buckets view implementation and bucket-mapping UX refinement inside the existing State Workflow Editor
 
 ### Checkpoint Status
 
-- Git HEAD: `current HEAD after checkpoint commit`
-- Working tree: clean after checkpoint commit
-- Dirty files intentionally in scope: None after checkpoint commit
+- Git HEAD: current `main` checkout before the workflow buckets commit
+- Working tree: dirty with workflow bucket implementation changes
+- Dirty files intentionally in scope: `README.md`, `docs/plans/state-workflow-editor.md`, `handoff.md`, `src/App.test.tsx`, `src/App.tsx`, `src/lib/workflow.test.ts`, `src/lib/workflow.ts`, `src/styles.css`
 - Dirty files intentionally out of scope: None
 - Untracked files intentionally in scope: None after checkpoint commit
 - Untracked files intentionally out of scope: None
@@ -31,24 +31,24 @@
 - Last verification:
   - command: `npm run verify`
   - result: passed
-  - timestamp UTC: 2026-05-15T01:13:25Z
-- Handoff freshness: fresh-to-HEAD after checkpoint commit
-- Safe-to-continue basis: this handoff is committed with the app/package version bump and expanded editor changes described below
-- Next checkpoint action: continue from the clean committed checkpoint
+  - timestamp UTC: 2026-05-15T03:24:03Z
+- Handoff freshness: refreshed for the current workflow-buckets implementation after final verification
+- Safe-to-continue basis: bucket changes are scoped to the workflow contract layer and editor UI; state-machine core remains unchanged
+- Next checkpoint action: commit the workflow-buckets checkpoint if requested
 
 ## 2. Executive Summary
 
-The project is a TypeScript/Vite/React repo containing a reusable state-machine core, a workflow contract layer, and a browser-based editor. The state-machine core owns valid states, allowed state-to-state transitions, terminal states, definition metadata, and validation. The workflow layer maps named app actions onto valid state transitions while keeping guards, authorization, side effects, persistence, jobs, retries, idempotency, and runtime orchestration out of scope.
+The project is a TypeScript/Vite/React repo containing a reusable state-machine core, a workflow contract layer, and a browser-based editor. The state-machine core owns valid states, allowed state-to-state transitions, terminal states, definition metadata, and validation. The workflow layer maps named app actions onto valid state transitions and groups states into workflow buckets while keeping guards, authorization, side effects, persistence, jobs, retries, idempotency, and runtime orchestration out of scope.
 
-The current checkpoint expands the app into `State Workflow Editor`, with State Machine, Workflow, and Settings pages. App/package version is `0.0.2`. State-machine definition exports remain separate from app versioning and still use definition schema `0.2.0`. Workflow definitions use workflow schema `0.1.0` and support both linked and bundled exports.
+The current checkpoint adds exported workflow buckets to `State Workflow Editor`. App/package version remains `0.0.2`. State-machine definition exports remain separate from app versioning and still use definition schema `0.2.0`. Workflow definitions now use workflow schema `0.2.0`, include bucket mappings, and support both linked and bundled exports.
 
 ## 3. Current Objective
 
-Immediate goal: checkpoint the expanded State Workflow Editor implementation, update the app/package version, refresh durable handoff context, verify, and commit all project changes.
+Immediate goal: implement the Workflow page `Actions / Buckets` segmented editor, export buckets in workflow JSON, preserve the workflow preview pane, refresh durable handoff context, and verify.
 
-Intended finished state: users can author state-machine definitions, author workflow action contracts against the loaded state-machine definition, select which state's workflow actions are visible from a fixed non-scrolling control area, pick a local project folder to fill slug-like Target Project values, preview both definition types with Mermaid, and export state-machine JSON, linked workflow JSON, or bundled workflow JSON.
+Intended finished state: users can author state-machine definitions, author workflow action contracts against the loaded state-machine definition, define workflow buckets, map every state into exactly one bucket, pick a local project folder to fill slug-like Target Project values, preview both definition types with Mermaid, and export state-machine JSON, linked workflow JSON, or bundled workflow JSON.
 
-Definition of done: `npm run verify` passes and the checkpoint is committed.
+Definition of done: `npm run verify` passes.
 
 ## 4. Current State
 
@@ -56,16 +56,18 @@ Definition of done: `npm run verify` passes and the checkpoint is committed.
 
 - Core validation and runtime helpers are implemented in `src/lib/stateMachine.ts`.
 - Definition schema is `0.2.0` and includes `appName`, `definitionVersion`, `id`, `states`, `terminalStates`, and `transitions`.
-- Workflow validation and helper APIs are implemented in `src/lib/workflow.ts`; workflow schema is `0.1.0`.
+- Workflow validation and helper APIs are implemented in `src/lib/workflow.ts`; workflow schema is `0.2.0`.
 - Visual editor supports State Machine, Workflow, and Settings pages.
 - State Machine page supports target project, folder-based slug project picking, state machine ID, state machine version, state IDs, terminal toggles, selected-state transition rows, continuous validation, JSON import/export, and read-only Mermaid graph preview.
-- Workflow page supports workflow metadata, folder-based slug project picking, linked state-machine reference display, fixed selected-state action filtering, visible action column headings, action-button label editing without duplicating action IDs in rows, workflow validation, linked workflow import/export, bundled workflow import/export, and action-labelled Mermaid preview.
+- Workflow page supports workflow metadata, folder-based slug project picking, linked state-machine reference display, an `Actions / Buckets` segmented editor, fixed selected-state action filtering, visible action column headings, action-button label editing without duplicating action IDs in rows, direct bucket-name editing, selected-bucket state mapping through `Add State`, row-level state removal, workflow validation, linked workflow import/export, bundled workflow import/export, and action-labelled Mermaid preview.
+- Workflow buckets are exported workflow contract metadata. Bucket IDs are unique lowercase snake_case values, labels are required, bucket states must exist in the linked state-machine definition, and every state must be assigned to exactly one bucket.
+- Importing older workflow schema `0.1.0` files upgrades them in memory by adding a default bucket that covers the linked state-machine states; new exports write schema `0.2.0`.
 - Workflow actions header, Add Action button, selected state selector, and action column headings live in a compact non-scrolling container above the scrollable action rows.
 - Metadata field labels are positioned above their controls. State Machine fields are ordered Target Project, State Machine ID, State Machine Version. Workflow fields use the corresponding workflow ordering and labels.
 - Mermaid is a runtime UI dependency loaded dynamically by the preview component; it is not imported by the state-machine core and is not part of exported definition JSON.
 - Export uses `window.showSaveFilePicker` when available and falls back to browser download when unavailable.
 - App settings store configurable logo URL and light/dark theme in browser local storage.
-- Tests cover state-machine behavior, workflow behavior, metadata validation, settings logo persistence, theme switching, folder project picking, state-machine import/export, workflow linked/bundled import/export, selected-state transition editing, fixed selected-state workflow action filtering, workflow action editing, Mermaid source generation, mocked Mermaid preview rendering, and visible app version.
+- Tests cover state-machine behavior, workflow behavior, workflow bucket validation, metadata validation, settings logo persistence, theme switching, folder project picking, state-machine import/export, workflow linked/bundled import/export with buckets, older workflow import upgrade, selected-state transition editing, fixed selected-state workflow action filtering, workflow action editing, workflow bucket mapping UI, Mermaid source generation, mocked Mermaid preview rendering, and visible app version.
 - CI workflow is present and runs `npm ci` plus `npm run verify`.
 
 ### Partially Working

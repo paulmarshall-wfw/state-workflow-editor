@@ -7,7 +7,7 @@ import {
   validateStateMachineDefinition,
 } from "./stateMachine";
 
-export const WORKFLOW_SCHEMA_VERSION = "0.1.0" as const;
+export const WORKFLOW_SCHEMA_VERSION = "0.2.0" as const;
 
 export type WorkflowSchemaVersion = typeof WORKFLOW_SCHEMA_VERSION;
 
@@ -23,6 +23,12 @@ export type WorkflowAction<State extends string = string> = {
   to: State;
 };
 
+export type WorkflowBucket<State extends string = string> = {
+  id: string;
+  label: string;
+  states: readonly State[];
+};
+
 export type WorkflowDefinition<State extends string = string> = {
   schemaVersion: WorkflowSchemaVersion;
   appName: string;
@@ -31,6 +37,7 @@ export type WorkflowDefinition<State extends string = string> = {
   stateMachine: WorkflowStateMachineReference;
   embeddedStateMachineDefinition?: StateMachineDefinition<State>;
   actions: readonly WorkflowAction<State>[];
+  buckets: readonly WorkflowBucket<State>[];
 };
 
 export type WorkflowValidationCode =
@@ -48,7 +55,13 @@ export type WorkflowValidationCode =
   | "missing_state_machine_definition"
   | "unknown_action_state"
   | "illegal_action_transition"
-  | "terminal_state_has_action";
+  | "terminal_state_has_action"
+  | "invalid_bucket_id"
+  | "duplicate_bucket"
+  | "missing_bucket_label"
+  | "unknown_bucket_state"
+  | "duplicate_bucket_state"
+  | "unmapped_bucket_state";
 
 export type WorkflowValidationError = {
   code: WorkflowValidationCode;
@@ -66,6 +79,7 @@ export type DefinedWorkflow<State extends string = string> = {
   stateMachine: ReturnType<typeof defineStateMachine<State>>;
   actionsByState: ReadonlyMap<State, readonly WorkflowAction<State>[]>;
   actionTargets: ReadonlyMap<string, State>;
+  bucketsByState: ReadonlyMap<State, WorkflowBucket<State>>;
 };
 
 export class WorkflowDefinitionError extends Error {
@@ -84,6 +98,7 @@ export function validateWorkflowDefinition<State extends string>(
 ): WorkflowValidationResult {
   const errors: WorkflowValidationError[] = [];
   const actionCounts = countValues(workflow.actions.map((action) => action.id));
+  const bucketCounts = countValues(workflow.buckets.map((bucket) => bucket.id));
   const embeddedStateMachine = workflow.embeddedStateMachineDefinition;
   const effectiveStateMachine = embeddedStateMachine ?? stateMachineDefinition;
 
@@ -170,6 +185,16 @@ export function validateWorkflowDefinition<State extends string>(
     }
   }
 
+  for (const [bucketId, count] of bucketCounts) {
+    if (count > 1) {
+      errors.push({
+        code: "duplicate_bucket",
+        message: `Bucket "${bucketId}" is defined more than once.`,
+        path: "buckets",
+      });
+    }
+  }
+
   if (!effectiveStateMachine) {
     return { valid: errors.length === 0, errors };
   }
@@ -183,7 +208,7 @@ export function validateWorkflowDefinition<State extends string>(
   }
 
   workflow.actions.forEach((action, index) => {
-    if (!isValidActionId(action.id)) {
+    if (!isValidWorkflowId(action.id)) {
       errors.push({
         code: "invalid_action_id",
         message: `Action "${action.id}" must be a lowercase string literal using letters, numbers, and underscores.`,
@@ -225,6 +250,59 @@ export function validateWorkflowDefinition<State extends string>(
     }
   });
 
+  workflow.buckets.forEach((bucket, bucketIndex) => {
+    if (!isValidWorkflowId(bucket.id)) {
+      errors.push({
+        code: "invalid_bucket_id",
+        message: `Bucket "${bucket.id}" must be a lowercase string literal using letters, numbers, and underscores.`,
+        path: `buckets.${bucketIndex}.id`,
+      });
+    }
+
+    if (!bucket.label.trim()) {
+      errors.push({
+        code: "missing_bucket_label",
+        message: `Bucket "${bucket.id || bucketIndex + 1}" needs a label.`,
+        path: `buckets.${bucketIndex}.label`,
+      });
+    }
+  });
+
+  const bucketStateAssignments = new Map<State, string[]>();
+
+  workflow.buckets.forEach((bucket, bucketIndex) => {
+    bucket.states.forEach((state, stateIndex) => {
+      if (!machine?.states.has(state)) {
+        errors.push({
+          code: "unknown_bucket_state",
+          message: `Bucket "${bucket.id || bucketIndex + 1}" references unknown state "${state}".`,
+          path: `buckets.${bucketIndex}.states.${stateIndex}`,
+        });
+        return;
+      }
+
+      bucketStateAssignments.set(state, [...(bucketStateAssignments.get(state) ?? []), bucket.id]);
+    });
+  });
+
+  for (const state of machine.definition.states) {
+    const assignments = bucketStateAssignments.get(state) ?? [];
+
+    if (assignments.length === 0) {
+      errors.push({
+        code: "unmapped_bucket_state",
+        message: `State "${state}" must be assigned to one workflow bucket.`,
+        path: "buckets",
+      });
+    } else if (assignments.length > 1) {
+      errors.push({
+        code: "duplicate_bucket_state",
+        message: `State "${state}" is assigned to more than one workflow bucket.`,
+        path: "buckets",
+      });
+    }
+  }
+
   return {
     valid: errors.length === 0,
     errors,
@@ -256,6 +334,7 @@ export function defineWorkflow<State extends string>(
   const stateMachine = defineStateMachine(effectiveStateMachineDefinition);
   const actionsByState = new Map<State, WorkflowAction<State>[]>();
   const actionTargets = new Map<string, State>();
+  const bucketsByState = new Map<State, WorkflowBucket<State>>();
 
   for (const state of stateMachine.definition.states) {
     actionsByState.set(state, []);
@@ -264,6 +343,14 @@ export function defineWorkflow<State extends string>(
   for (const action of workflow.actions) {
     actionsByState.get(action.from)?.push({ ...action });
     actionTargets.set(action.id, action.to);
+  }
+
+  for (const bucket of workflow.buckets) {
+    const copiedBucket = { ...bucket, states: [...bucket.states] };
+
+    for (const state of bucket.states) {
+      bucketsByState.set(state, copiedBucket);
+    }
   }
 
   return {
@@ -282,10 +369,12 @@ export function defineWorkflow<State extends string>(
           }
         : undefined,
       actions: workflow.actions.map((action) => ({ ...action })),
+      buckets: workflow.buckets.map((bucket) => ({ ...bucket, states: [...bucket.states] })),
     },
     stateMachine,
     actionsByState,
     actionTargets,
+    bucketsByState,
   };
 }
 
@@ -321,7 +410,7 @@ function countValues(values: readonly string[]): Map<string, number> {
   return counts;
 }
 
-function isValidActionId(actionId: string): boolean {
+function isValidWorkflowId(actionId: string): boolean {
   return /^[a-z][a-z0-9_]*$/.test(actionId);
 }
 

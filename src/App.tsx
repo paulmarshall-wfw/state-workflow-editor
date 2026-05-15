@@ -1,10 +1,11 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import packageJson from "../package.json";
 import {
   STATE_MACHINE_SCHEMA_VERSION,
   WORKFLOW_SCHEMA_VERSION,
   StateMachineDefinition,
   WorkflowAction,
+  WorkflowBucket,
   WorkflowDefinition,
   defineStateMachine,
   defineWorkflow,
@@ -59,7 +60,12 @@ type WorkflowActionWithIndex = WorkflowAction<string> & {
   index: number;
 };
 
+type WorkflowBucketWithIndex = WorkflowBucket<string> & {
+  index: number;
+};
+
 type ActivePage = "state-machine" | "workflow" | "settings";
+type WorkflowEditorView = "actions" | "buckets";
 
 type MermaidPreviewTheme = AppSettings["theme"];
 
@@ -99,6 +105,11 @@ const initialWorkflowDefinition: EditableWorkflowDefinition = {
     { id: "cancel_queued", label: "Cancel", from: "queued", to: "cancelled" },
     { id: "cancel_running", label: "Cancel", from: "running", to: "cancelled" },
   ],
+  buckets: [
+    { id: "waiting", label: "Waiting", states: ["queued"] },
+    { id: "active", label: "Active", states: ["running", "failed"] },
+    { id: "finished", label: "Finished", states: ["completed", "cancelled"] },
+  ],
 };
 
 const appSettingsStorageKey = "state-workflow-editor-settings";
@@ -113,6 +124,9 @@ export function App() {
   const [stateMachineMessage, setStateMachineMessage] = useState<string | null>(null);
   const [workflowMessage, setWorkflowMessage] = useState<string | null>(null);
   const [selectedState, setSelectedState] = useState(initialDefinition.states[0]);
+  const [selectedWorkflowView, setSelectedWorkflowView] = useState<WorkflowEditorView>("actions");
+  const [selectedBucketId, setSelectedBucketId] = useState(initialWorkflowDefinition.buckets[0].id);
+  const [draftStateBucketId, setDraftStateBucketId] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<ActivePage>("state-machine");
   const [settings, setSettings] = useState<AppSettings>(loadAppSettings);
   const stateMachineFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -158,10 +172,25 @@ export function App() {
   const workflowActions = linkedWorkflow.actions
     .map((action, index) => ({ ...action, index }))
     .filter((action) => action.from === selectedState);
+  const workflowBuckets = linkedWorkflow.buckets.map((bucket, index) => ({ ...bucket, index }));
+  const selectedBucket = workflowBuckets.find((bucket) => bucket.id === selectedBucketId) ?? workflowBuckets[0];
+  const selectedBucketStates = selectedBucket?.states ?? [];
 
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
   }, [settings.theme]);
+
+  useEffect(() => {
+    if (workflow.buckets.length > 0 && !workflow.buckets.some((bucket) => bucket.id === selectedBucketId)) {
+      setSelectedBucketId(workflow.buckets[0].id);
+    }
+  }, [selectedBucketId, workflow.buckets]);
+
+  useEffect(() => {
+    if (draftStateBucketId && draftStateBucketId !== selectedBucketId) {
+      setDraftStateBucketId(null);
+    }
+  }, [draftStateBucketId, selectedBucketId]);
 
   function updateId(id: string) {
     setDefinition((current) => ({ ...current, id }));
@@ -185,6 +214,7 @@ export function App() {
       const nextState = nextUniqueStateId(current.states);
 
       setSelectedState(nextState);
+      setWorkflow((currentWorkflow) => assignStateToBucket(currentWorkflow, nextState, selectedBucketId));
 
       return {
         ...current,
@@ -210,6 +240,18 @@ export function App() {
       };
     });
     setSelectedState((current) => (current === previousState ? nextState : current));
+    setWorkflow((current) => ({
+      ...current,
+      actions: current.actions.map((action) => ({
+        ...action,
+        from: action.from === previousState ? nextState : action.from,
+        to: action.to === previousState ? nextState : action.to,
+      })),
+      buckets: current.buckets.map((bucket) => ({
+        ...bucket,
+        states: bucket.states.map((state) => (state === previousState ? nextState : state)),
+      })),
+    }));
   }
 
   function removeState(index: number) {
@@ -230,6 +272,29 @@ export function App() {
     setSelectedState((current) =>
       current === removedState ? definition.states[index + 1] ?? definition.states[index - 1] ?? "" : current,
     );
+    setWorkflow((current) => ({
+      ...current,
+      actions: current.actions.filter((action) => action.from !== removedState && action.to !== removedState),
+      buckets: current.buckets.map((bucket) => ({
+        ...bucket,
+        states: bucket.states.filter((state) => state !== removedState),
+      })),
+    }));
+  }
+
+  function moveState(fromIndex: number, toIndex: number) {
+    setDefinition((current) => {
+      const nextStates = moveArrayItem(current.states, fromIndex, toIndex);
+
+      if (nextStates === current.states) {
+        return current;
+      }
+
+      return {
+        ...current,
+        states: nextStates,
+      };
+    });
   }
 
   function toggleTerminalState(state: string, checked: boolean) {
@@ -315,11 +380,133 @@ export function App() {
     }));
   }
 
+  function moveWorkflowAction(fromVisibleIndex: number, toVisibleIndex: number) {
+    setWorkflow((current) => {
+      const nextActions = moveFilteredArrayItem(
+        current.actions,
+        (action) => action.from === selectedState,
+        fromVisibleIndex,
+        toVisibleIndex,
+      );
+
+      if (nextActions === current.actions) {
+        return current;
+      }
+
+      return {
+        ...current,
+        actions: nextActions,
+      };
+    });
+  }
+
   function removeWorkflowAction(index: number) {
     setWorkflow((current) => ({
       ...current,
       actions: current.actions.filter((_, actionIndex) => actionIndex !== index),
     }));
+  }
+
+  function moveWorkflowBucket(fromIndex: number, toIndex: number) {
+    setWorkflow((current) => {
+      const nextBuckets = moveArrayItem(current.buckets, fromIndex, toIndex);
+
+      if (nextBuckets === current.buckets) {
+        return current;
+      }
+
+      return {
+        ...current,
+        buckets: nextBuckets,
+      };
+    });
+  }
+
+  function addWorkflowBucket() {
+    setWorkflow((current) => {
+      const id = nextUniqueBucketId(current.buckets);
+      const nextBucket = { id, label: titleCaseAction(id), states: [] };
+
+      setSelectedBucketId(id);
+
+      return {
+        ...current,
+        buckets: [...current.buckets, nextBucket],
+      };
+    });
+  }
+
+  function updateWorkflowBucketLabel(index: number, label: string) {
+    setWorkflow((current) => ({
+      ...current,
+      buckets: current.buckets.map((bucket, bucketIndex) => {
+        if (bucketIndex !== index) {
+          return bucket;
+        }
+
+        const nextId = label.trim() ? uniqueBucketIdFromLabel(label, current.buckets, index) : bucket.id;
+
+        if (bucket.id === selectedBucketId && nextId !== selectedBucketId) {
+          setSelectedBucketId(nextId);
+        }
+
+        return {
+          ...bucket,
+          label,
+          id: nextId,
+        };
+      }),
+    }));
+  }
+
+  function removeWorkflowBucket(index: number) {
+    setWorkflow((current) => {
+      const bucket = current.buckets[index];
+
+      if (!bucket || current.buckets.length <= 1 || bucket.states.length > 0) {
+        return current;
+      }
+
+      const nextBuckets = current.buckets.filter((_, bucketIndex) => bucketIndex !== index);
+
+      setSelectedBucketId(nextBuckets[Math.max(0, index - 1)]?.id ?? nextBuckets[0]?.id ?? "");
+
+      return {
+        ...current,
+        buckets: nextBuckets,
+      };
+    });
+  }
+
+  function moveStateToBucket(state: string, bucketId: string) {
+    setWorkflow((current) => assignStateToBucket(current, state, bucketId));
+  }
+
+  function addStateMappingRow() {
+    if (selectedBucket) {
+      setDraftStateBucketId(selectedBucket.id);
+    }
+  }
+
+  function selectStateForBucket(state: string) {
+    if (!state || !selectedBucket) {
+      return;
+    }
+
+    moveStateToBucket(state, selectedBucket.id);
+    setDraftStateBucketId(null);
+  }
+
+  function cancelStateMappingRow() {
+    setDraftStateBucketId(null);
+  }
+
+  function removeStateFromSelectedBucket(state: string) {
+    if (!selectedBucket) {
+      return;
+    }
+
+    setWorkflow((current) => removeStateFromBucket(current, state, selectedBucket.id));
   }
 
   function updateLogoUrl(logoUrl: string) {
@@ -422,8 +609,8 @@ export function App() {
     }
 
     try {
-      const parsed = JSON.parse(await file.text()) as EditableWorkflowDefinition;
-      const nextWorkflow = normalizeImportedWorkflowDefinition(parsed);
+      const parsed = JSON.parse(await file.text()) as ImportedWorkflowDefinition;
+      const nextWorkflow = normalizeImportedWorkflowDefinition(parsed, definition);
       const effectiveStateMachine = nextWorkflow.embeddedStateMachineDefinition ?? definition;
       const result = validateWorkflowDefinition(nextWorkflow, effectiveStateMachine);
 
@@ -438,6 +625,7 @@ export function App() {
       }
 
       setWorkflow(removeEmbeddedStateMachine(nextWorkflow));
+      setSelectedBucketId(nextWorkflow.buckets[0]?.id ?? "");
       setWorkflowMessage(null);
     } catch (error) {
       setWorkflowMessage(error instanceof Error ? error.message : "Unable to import workflow definition.");
@@ -610,6 +798,7 @@ export function App() {
                   onRename={renameState}
                   onRemove={removeState}
                   onToggleTerminal={toggleTerminalState}
+                  onReorder={moveState}
                 />
               </div>
             </section>
@@ -726,64 +915,144 @@ export function App() {
             </section>
           </section>
 
-          <section className="workspace-grid workflow-grid" aria-label="Workflow editor">
-            <section className="panel column-panel workflow-actions-panel">
-              <div className="workflow-action-toolbar">
-                <div className="workflow-action-toolbar-row">
-                  <h2>Actions</h2>
-                  <button
-                    type="button"
-                    className="secondary compact"
-                    onClick={addWorkflowAction}
-                    disabled={!selectedState || selectedStateIsTerminal || !selectedStateHasWorkflowTargets}
-                  >
-                    Add Action
-                  </button>
-                </div>
-                <div className="workflow-state-control">
-                  <label htmlFor="workflow-selected-state">Selected State</label>
-                  <StateSelect
-                    id="workflow-selected-state"
-                    label="Selected State"
-                    value={selectedState}
-                    states={stateOptions}
-                    onChange={setSelectedState}
-                  />
-                </div>
-                <div className="workflow-action-header" aria-hidden="true">
-                  <span>Button Label</span>
-                  <span>From State</span>
-                  <span>To State</span>
-                  <span>Action</span>
-                </div>
-              </div>
-              <div className="column-scroll">
-                <WorkflowActionList
-                  actions={workflowActions}
-                  selectedState={selectedState}
-                  states={stateOptions}
-                  onChange={updateWorkflowAction}
-                  onRemove={removeWorkflowAction}
-                />
-              </div>
+          <section className="workflow-editor-region">
+            <section className="workflow-view-tabs" aria-label="Workflow editor view">
+              <button
+                type="button"
+                className={selectedWorkflowView === "actions" ? "active" : ""}
+                onClick={() => setSelectedWorkflowView("actions")}
+              >
+                Actions
+              </button>
+              <button
+                type="button"
+                className={selectedWorkflowView === "buckets" ? "active" : ""}
+                onClick={() => setSelectedWorkflowView("buckets")}
+              >
+                Buckets
+              </button>
             </section>
 
-            <section className="panel column-panel graph-panel workflow-preview-panel">
-              <div className="panel-heading">
-                <h2>Workflow Preview</h2>
-                <span className="schema-version">schema v{linkedWorkflow.schemaVersion}</span>
-              </div>
-              <div className="column-scroll graph-scroll">
-                {definedWorkflow ? (
-                  <MermaidGraph
-                    machine={definedWorkflow.stateMachine.definition}
-                    workflow={definedWorkflow.definition}
-                    theme={settings.theme}
-                  />
-                ) : (
-                  <div className="empty-graph">No preview</div>
-                )}
-              </div>
+            <section
+              className={
+                selectedWorkflowView === "actions"
+                  ? "workspace-grid workflow-grid workflow-actions-grid"
+                  : "workspace-grid workflow-grid workflow-buckets-grid"
+              }
+              aria-label="Workflow editor"
+            >
+              {selectedWorkflowView === "actions" ? (
+                <section className="panel column-panel workflow-actions-panel">
+                  <div className="workflow-action-toolbar">
+                    <div className="workflow-action-toolbar-row">
+                      <h2>Actions</h2>
+                      <button
+                        type="button"
+                        className="secondary compact"
+                        onClick={addWorkflowAction}
+                        disabled={!selectedState || selectedStateIsTerminal || !selectedStateHasWorkflowTargets}
+                      >
+                        Add Action
+                      </button>
+                    </div>
+                    <div className="workflow-state-control">
+                      <label htmlFor="workflow-selected-state">Selected State</label>
+                      <StateSelect
+                        id="workflow-selected-state"
+                        label="Selected State"
+                        value={selectedState}
+                        states={stateOptions}
+                        onChange={setSelectedState}
+                    />
+                  </div>
+                  <div className="workflow-action-header" aria-hidden="true">
+                      <span />
+                      <span>Button Label</span>
+                      <span>From State</span>
+                      <span>To State</span>
+                      <span>Action</span>
+                      <span>Order</span>
+                    </div>
+                  </div>
+                  <div className="column-scroll">
+                    <WorkflowActionList
+                      actions={workflowActions}
+                      selectedState={selectedState}
+                      states={stateOptions}
+                      onChange={updateWorkflowAction}
+                      onRemove={removeWorkflowAction}
+                      onReorder={moveWorkflowAction}
+                    />
+                  </div>
+                </section>
+              ) : (
+                <>
+                  <section className="panel column-panel workflow-bucket-list-panel">
+                  <div className="panel-heading">
+                    <h2>Buckets</h2>
+                    <button type="button" className="secondary compact" onClick={addWorkflowBucket}>
+                        Add Bucket
+                      </button>
+                    </div>
+                  <div className="column-scroll">
+                    <WorkflowBucketList
+                      buckets={workflowBuckets}
+                      selectedBucketId={selectedBucket?.id ?? ""}
+                      onSelect={setSelectedBucketId}
+                        onRename={updateWorkflowBucketLabel}
+                        onRemove={removeWorkflowBucket}
+                        onReorder={moveWorkflowBucket}
+                      />
+                    </div>
+                  </section>
+
+                <section className="panel column-panel workflow-bucket-assignment-panel">
+                  <div className="panel-heading">
+                    <div>
+                      <h2>State Mapping</h2>
+                      <p className="panel-subtitle">{selectedBucket?.label ?? "No bucket selected"}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="secondary compact"
+                      onClick={addStateMappingRow}
+                      disabled={!selectedBucket || draftStateBucketId === selectedBucket.id}
+                    >
+                      Add State
+                    </button>
+                  </div>
+                  <div className="column-scroll">
+                    <WorkflowBucketAssignmentList
+                      states={stateOptions}
+                      selectedBucket={selectedBucket}
+                      selectedBucketStates={selectedBucketStates}
+                      showDraftRow={draftStateBucketId === selectedBucket?.id}
+                      onSelectState={selectStateForBucket}
+                      onCancelDraft={cancelStateMappingRow}
+                      onRemoveState={removeStateFromSelectedBucket}
+                    />
+                  </div>
+                </section>
+                </>
+              )}
+
+              <section className="panel column-panel graph-panel workflow-preview-panel">
+                <div className="panel-heading">
+                  <h2>Workflow Preview</h2>
+                  <span className="schema-version">schema v{linkedWorkflow.schemaVersion}</span>
+                </div>
+                <div className="column-scroll graph-scroll">
+                  {definedWorkflow ? (
+                    <MermaidGraph
+                      machine={definedWorkflow.stateMachine.definition}
+                      workflow={definedWorkflow.definition}
+                      theme={settings.theme}
+                    />
+                  ) : (
+                    <div className="empty-graph">No preview</div>
+                  )}
+                </div>
+              </section>
             </section>
           </section>
         </>
@@ -854,6 +1123,7 @@ function StateList({
   onRename,
   onRemove,
   onToggleTerminal,
+  onReorder,
 }: {
   states: readonly string[];
   selectedState: string;
@@ -862,16 +1132,89 @@ function StateList({
   onRename: (index: number, state: string) => void;
   onRemove: (index: number) => void;
   onToggleTerminal: (state: string, checked: boolean) => void;
+  onReorder: (fromIndex: number, toIndex: number) => void;
 }) {
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
+
+  function beginDrag(event: DragEvent<HTMLButtonElement>, index: number) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(index));
+    setDraggedIndex(index);
+    setDropTargetIndex(index);
+  }
+
+  function showDropTarget(event: DragEvent<HTMLElement>, index: number) {
+    if (draggedIndex === null) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropTargetIndex(index);
+  }
+
+  function dropState(event: DragEvent<HTMLElement>, index: number) {
+    event.preventDefault();
+    const sourceIndex = draggedIndex ?? Number.parseInt(event.dataTransfer.getData("text/plain"), 10);
+
+    if (Number.isInteger(sourceIndex)) {
+      onReorder(sourceIndex, index);
+    }
+
+    setDraggedIndex(null);
+    setDropTargetIndex(null);
+  }
+
+  function endDrag() {
+    setDraggedIndex(null);
+    setDropTargetIndex(null);
+  }
+
   return (
-    <div className="state-list">
+    <div className="state-list" role="list" aria-label="State list">
       {states.map((state, index) => {
         const isSelected = selectedState === state;
+        const rowLabel = state || `State ${index + 1}`;
+        const rowClasses = [
+          "state-row",
+          isSelected ? "selected" : "",
+          draggedIndex === index ? "dragging" : "",
+          dropTargetIndex === index && draggedIndex !== index ? "drop-target" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
 
         return (
-          <article key={`state-card-${index}`} className={isSelected ? "state-row selected" : "state-row"}>
+          <article
+            key={`state-card-${index}`}
+            className={rowClasses}
+            role="listitem"
+            aria-label={`${rowLabel} state row`}
+            onDragOver={(event) => showDropTarget(event, index)}
+            onDragEnter={(event) => showDropTarget(event, index)}
+            onDrop={(event) => dropState(event, index)}
+          >
+            <button
+              type="button"
+              className="state-drag-handle"
+              draggable
+              onDragStart={(event) => beginDrag(event, index)}
+              onDragEnd={endDrag}
+              aria-label={`Drag ${rowLabel}`}
+              title={`Drag ${rowLabel}`}
+            >
+              <span className="drag-grip" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+                <span />
+                <span />
+                <span />
+              </span>
+            </button>
             <button type="button" className="state-select" onClick={() => onSelect(state)} aria-pressed={isSelected}>
-              {state || `State ${index + 1}`}
+              {rowLabel}
             </button>
             <input
               aria-label={`State ${index + 1} ID`}
@@ -892,6 +1235,26 @@ function StateList({
             <button type="button" className="ghost compact" onClick={() => onRemove(index)}>
               Remove
             </button>
+            <div className="state-reorder-controls" aria-label={`${rowLabel} keyboard reorder controls`}>
+              <button
+                type="button"
+                className="ghost compact"
+                onClick={() => onReorder(index, index - 1)}
+                disabled={index === 0}
+                aria-label={`Move ${rowLabel} up`}
+              >
+                Up
+              </button>
+              <button
+                type="button"
+                className="ghost compact"
+                onClick={() => onReorder(index, index + 1)}
+                disabled={index === states.length - 1}
+                aria-label={`Move ${rowLabel} down`}
+              >
+                Down
+              </button>
+            </div>
           </article>
         );
       })}
@@ -947,44 +1310,348 @@ function WorkflowActionList({
   states,
   onChange,
   onRemove,
+  onReorder,
 }: {
   actions: WorkflowActionWithIndex[];
   selectedState: string;
   states: string[];
   onChange: (index: number, field: keyof WorkflowAction<string>, value: string) => void;
   onRemove: (index: number) => void;
+  onReorder: (fromVisibleIndex: number, toVisibleIndex: number) => void;
 }) {
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
+
+  function beginDrag(event: DragEvent<HTMLButtonElement>, visibleIndex: number) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(visibleIndex));
+    setDraggedIndex(visibleIndex);
+    setDropTargetIndex(visibleIndex);
+  }
+
+  function showDropTarget(event: DragEvent<HTMLElement>, visibleIndex: number) {
+    if (draggedIndex === null) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropTargetIndex(visibleIndex);
+  }
+
+  function dropAction(event: DragEvent<HTMLElement>, visibleIndex: number) {
+    event.preventDefault();
+    const sourceIndex = draggedIndex ?? Number.parseInt(event.dataTransfer.getData("text/plain"), 10);
+
+    if (Number.isInteger(sourceIndex)) {
+      onReorder(sourceIndex, visibleIndex);
+    }
+
+    setDraggedIndex(null);
+    setDropTargetIndex(null);
+  }
+
+  function endDrag() {
+    setDraggedIndex(null);
+    setDropTargetIndex(null);
+  }
+
   if (actions.length === 0) {
     return <div className="empty-column">No workflow actions for {selectedState || "this state"}.</div>;
   }
 
   return (
-    <div className="workflow-action-list">
-      {actions.map((action) => (
-        <article key={`workflow-action-${action.index}`} className="workflow-action-row">
-          <input
-            aria-label={`Action ${action.index + 1} label`}
-            value={action.label}
-            onChange={(event) => onChange(action.index, "label", event.target.value)}
-            spellCheck={false}
-          />
-          <StateSelect
-            label={`Action ${action.index + 1} source`}
-            value={action.from}
-            states={states}
-            onChange={(value) => onChange(action.index, "from", value)}
-          />
-          <StateSelect
-            label={`Action ${action.index + 1} target`}
-            value={action.to}
-            states={states}
-            onChange={(value) => onChange(action.index, "to", value)}
-          />
-          <button type="button" className="ghost compact" onClick={() => onRemove(action.index)}>
+    <div className="workflow-action-list" role="list" aria-label="Workflow action list">
+      {actions.map((action, visibleIndex) => {
+        const actionLabel = action.label || action.id || `Action ${action.index + 1}`;
+        const rowClasses = [
+          "workflow-action-row",
+          draggedIndex === visibleIndex ? "dragging" : "",
+          dropTargetIndex === visibleIndex && draggedIndex !== visibleIndex ? "drop-target" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+
+        return (
+          <article
+            key={`workflow-action-${action.index}`}
+            className={rowClasses}
+            role="listitem"
+            aria-label={`${actionLabel} action row`}
+            onDragOver={(event) => showDropTarget(event, visibleIndex)}
+            onDragEnter={(event) => showDropTarget(event, visibleIndex)}
+            onDrop={(event) => dropAction(event, visibleIndex)}
+          >
+            <button
+              type="button"
+              className="state-drag-handle"
+              draggable
+              onDragStart={(event) => beginDrag(event, visibleIndex)}
+              onDragEnd={endDrag}
+              aria-label={`Drag ${actionLabel} action`}
+              title={`Drag ${actionLabel} action`}
+            >
+              <span className="drag-grip" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+                <span />
+                <span />
+                <span />
+              </span>
+            </button>
+            <input
+              aria-label={`Action ${action.index + 1} label`}
+              value={action.label}
+              onChange={(event) => onChange(action.index, "label", event.target.value)}
+              spellCheck={false}
+            />
+            <StateSelect
+              label={`Action ${action.index + 1} source`}
+              value={action.from}
+              states={states}
+              onChange={(value) => onChange(action.index, "from", value)}
+            />
+            <StateSelect
+              label={`Action ${action.index + 1} target`}
+              value={action.to}
+              states={states}
+              onChange={(value) => onChange(action.index, "to", value)}
+            />
+            <button type="button" className="ghost compact" onClick={() => onRemove(action.index)}>
+              Remove
+            </button>
+            <div className="state-reorder-controls" aria-label={`${actionLabel} action keyboard reorder controls`}>
+              <button
+                type="button"
+                className="ghost compact"
+                onClick={() => onReorder(visibleIndex, visibleIndex - 1)}
+                disabled={visibleIndex === 0}
+                aria-label={`Move ${actionLabel} action up`}
+              >
+                Up
+              </button>
+              <button
+                type="button"
+                className="ghost compact"
+                onClick={() => onReorder(visibleIndex, visibleIndex + 1)}
+                disabled={visibleIndex === actions.length - 1}
+                aria-label={`Move ${actionLabel} action down`}
+              >
+                Down
+              </button>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function WorkflowBucketList({
+  buckets,
+  selectedBucketId,
+  onSelect,
+  onRename,
+  onRemove,
+  onReorder,
+}: {
+  buckets: WorkflowBucketWithIndex[];
+  selectedBucketId: string;
+  onSelect: (bucketId: string) => void;
+  onRename: (index: number, label: string) => void;
+  onRemove: (index: number) => void;
+  onReorder: (fromIndex: number, toIndex: number) => void;
+}) {
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
+
+  function beginDrag(event: DragEvent<HTMLButtonElement>, index: number) {
+    event.stopPropagation();
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(index));
+    setDraggedIndex(index);
+    setDropTargetIndex(index);
+  }
+
+  function showDropTarget(event: DragEvent<HTMLElement>, index: number) {
+    if (draggedIndex === null) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropTargetIndex(index);
+  }
+
+  function dropBucket(event: DragEvent<HTMLElement>, index: number) {
+    event.preventDefault();
+    const sourceIndex = draggedIndex ?? Number.parseInt(event.dataTransfer.getData("text/plain"), 10);
+
+    if (Number.isInteger(sourceIndex)) {
+      onReorder(sourceIndex, index);
+    }
+
+    setDraggedIndex(null);
+    setDropTargetIndex(null);
+  }
+
+  function endDrag() {
+    setDraggedIndex(null);
+    setDropTargetIndex(null);
+  }
+
+  return (
+    <div className="workflow-bucket-list" role="list" aria-label="Workflow bucket list">
+      {buckets.map((bucket) => {
+        const isSelected = bucket.id === selectedBucketId;
+        const removeDisabled = buckets.length <= 1 || bucket.states.length > 0;
+        const bucketLabel = bucket.label || bucket.id || `Bucket ${bucket.index + 1}`;
+        const rowClasses = [
+          "bucket-row",
+          isSelected ? "selected" : "",
+          draggedIndex === bucket.index ? "dragging" : "",
+          dropTargetIndex === bucket.index && draggedIndex !== bucket.index ? "drop-target" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+
+        return (
+          <article
+            key={`workflow-bucket-${bucket.index}`}
+            className={rowClasses}
+            role="listitem"
+            aria-label={`${bucketLabel} bucket row`}
+            onClick={() => onSelect(bucket.id)}
+            onDragOver={(event) => showDropTarget(event, bucket.index)}
+            onDragEnter={(event) => showDropTarget(event, bucket.index)}
+            onDrop={(event) => dropBucket(event, bucket.index)}
+          >
+            <button
+              type="button"
+              className="state-drag-handle"
+              draggable
+              onClick={(event) => event.stopPropagation()}
+              onDragStart={(event) => beginDrag(event, bucket.index)}
+              onDragEnd={endDrag}
+              aria-label={`Drag ${bucketLabel} bucket`}
+              title={`Drag ${bucketLabel} bucket`}
+            >
+              <span className="drag-grip" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+                <span />
+                <span />
+                <span />
+              </span>
+            </button>
+            <input
+              aria-label={`Bucket ${bucket.index + 1} label`}
+              value={bucket.label}
+              onChange={(event) => {
+                onSelect(bucket.id);
+                onRename(bucket.index, event.target.value);
+              }}
+              onFocus={() => onSelect(bucket.id)}
+              spellCheck={false}
+            />
+            <span className="bucket-count" aria-label={`${bucket.label || `Bucket ${bucket.index + 1}`} state count`}>
+              {bucket.states.length}
+            </span>
+            <button
+              type="button"
+              className="ghost compact"
+              onClick={(event) => {
+                event.stopPropagation();
+                onRemove(bucket.index);
+              }}
+              disabled={removeDisabled}
+              title={removeDisabled ? "Move states out before removing this bucket" : "Remove bucket"}
+            >
+              Remove
+            </button>
+            <div className="state-reorder-controls" aria-label={`${bucketLabel} bucket keyboard reorder controls`}>
+              <button
+                type="button"
+                className="ghost compact"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onReorder(bucket.index, bucket.index - 1);
+                }}
+                disabled={bucket.index === 0}
+                aria-label={`Move ${bucketLabel} bucket up`}
+              >
+                Up
+              </button>
+              <button
+                type="button"
+                className="ghost compact"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onReorder(bucket.index, bucket.index + 1);
+                }}
+                disabled={bucket.index === buckets.length - 1}
+                aria-label={`Move ${bucketLabel} bucket down`}
+              >
+                Down
+              </button>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function WorkflowBucketAssignmentList({
+  states,
+  selectedBucket,
+  selectedBucketStates,
+  showDraftRow,
+  onSelectState,
+  onCancelDraft,
+  onRemoveState,
+}: {
+  states: string[];
+  selectedBucket?: WorkflowBucketWithIndex;
+  selectedBucketStates: readonly string[];
+  showDraftRow: boolean;
+  onSelectState: (state: string) => void;
+  onCancelDraft: () => void;
+  onRemoveState: (state: string) => void;
+}) {
+  if (!selectedBucket) {
+    return <div className="empty-column">Add a workflow bucket to map states.</div>;
+  }
+
+  if (selectedBucketStates.length === 0 && !showDraftRow) {
+    return <div className="empty-column">No states mapped to this bucket.</div>;
+  }
+
+  return (
+    <div className="bucket-assignment-list">
+      {selectedBucketStates.map((state) => (
+        <article key={`bucket-assignment-${state}`} className="assignment-row selected">
+          <div className="assignment-state">
+            <span>{state}</span>
+          </div>
+          <button type="button" className="ghost compact" onClick={() => onRemoveState(state)}>
             Remove
           </button>
         </article>
       ))}
+      {showDraftRow ? (
+        <article className="assignment-row draft">
+          <div className="assignment-state">
+            <span>New state</span>
+          </div>
+          <StateSelect label="State to add" value="" states={states} onChange={onSelectState} />
+          <button type="button" className="ghost compact" onClick={onCancelDraft}>
+            Cancel
+          </button>
+        </article>
+      ) : null}
     </div>
   );
 }
@@ -1108,6 +1775,62 @@ function nextUniqueStateId(states: readonly string[]) {
   return candidate;
 }
 
+function moveArrayItem<Item>(items: readonly Item[], fromIndex: number, toIndex: number): readonly Item[] {
+  if (
+    fromIndex === toIndex ||
+    fromIndex < 0 ||
+    toIndex < 0 ||
+    fromIndex >= items.length ||
+    toIndex >= items.length
+  ) {
+    return items;
+  }
+
+  const nextItems = [...items];
+  const movedItems = nextItems.splice(fromIndex, 1);
+  nextItems.splice(toIndex, 0, ...movedItems);
+
+  return nextItems;
+}
+
+function moveFilteredArrayItem<Item>(
+  items: readonly Item[],
+  predicate: (item: Item) => boolean,
+  fromFilteredIndex: number,
+  toFilteredIndex: number,
+): readonly Item[] {
+  const filteredPositions = items.reduce<number[]>((positions, item, index) => {
+    if (predicate(item)) {
+      positions.push(index);
+    }
+
+    return positions;
+  }, []);
+
+  if (
+    fromFilteredIndex === toFilteredIndex ||
+    fromFilteredIndex < 0 ||
+    toFilteredIndex < 0 ||
+    fromFilteredIndex >= filteredPositions.length ||
+    toFilteredIndex >= filteredPositions.length
+  ) {
+    return items;
+  }
+
+  const reorderedFilteredItems = moveArrayItem(
+    filteredPositions.map((position) => items[position]),
+    fromFilteredIndex,
+    toFilteredIndex,
+  );
+  const nextItems = [...items];
+
+  filteredPositions.forEach((position, index) => {
+    nextItems[position] = reorderedFilteredItems[index];
+  });
+
+  return nextItems;
+}
+
 function nextUniqueActionId(actions: readonly WorkflowAction<string>[]) {
   let index = actions.length + 1;
   let candidate = `action_${index}`;
@@ -1121,9 +1844,41 @@ function nextUniqueActionId(actions: readonly WorkflowAction<string>[]) {
   return candidate;
 }
 
+function nextUniqueBucketId(buckets: readonly WorkflowBucket<string>[]) {
+  let index = buckets.length + 1;
+  let candidate = `bucket_${index}`;
+  const bucketIds = buckets.map((bucket) => bucket.id);
+
+  while (bucketIds.includes(candidate)) {
+    index += 1;
+    candidate = `bucket_${index}`;
+  }
+
+  return candidate;
+}
+
 function uniqueActionIdFromLabel(label: string, actions: readonly WorkflowAction<string>[], currentIndex: number) {
   const baseId = actionIdFromLabel(label);
   const existingIds = actions.map((action, index) => (index === currentIndex ? "" : action.id));
+
+  if (!existingIds.includes(baseId)) {
+    return baseId;
+  }
+
+  let suffix = 2;
+  let nextId = `${baseId}_${suffix}`;
+
+  while (existingIds.includes(nextId)) {
+    suffix += 1;
+    nextId = `${baseId}_${suffix}`;
+  }
+
+  return nextId;
+}
+
+function uniqueBucketIdFromLabel(label: string, buckets: readonly WorkflowBucket<string>[], currentIndex: number) {
+  const baseId = actionIdFromLabel(label);
+  const existingIds = buckets.map((bucket, index) => (index === currentIndex ? "" : bucket.id));
 
   if (!existingIds.includes(baseId)) {
     return baseId;
@@ -1158,6 +1913,51 @@ function titleCaseAction(actionId: string) {
     .join(" ");
 }
 
+function assignStateToBucket(
+  workflow: EditableWorkflowDefinition,
+  state: string,
+  bucketId: string,
+): EditableWorkflowDefinition {
+  if (!state || workflow.buckets.length === 0) {
+    return workflow;
+  }
+
+  const targetBucketId = workflow.buckets.some((bucket) => bucket.id === bucketId) ? bucketId : workflow.buckets[0].id;
+
+  return {
+    ...workflow,
+    buckets: workflow.buckets.map((bucket) => {
+      const statesWithoutMovedState = bucket.states.filter((bucketState) => bucketState !== state);
+
+      return {
+        ...bucket,
+        states:
+          bucket.id === targetBucketId
+            ? Array.from(new Set([...statesWithoutMovedState, state]))
+            : statesWithoutMovedState,
+      };
+    }),
+  };
+}
+
+function removeStateFromBucket(
+  workflow: EditableWorkflowDefinition,
+  state: string,
+  bucketId: string,
+): EditableWorkflowDefinition {
+  return {
+    ...workflow,
+    buckets: workflow.buckets.map((bucket) =>
+      bucket.id === bucketId
+        ? {
+            ...bucket,
+            states: bucket.states.filter((bucketState) => bucketState !== state),
+          }
+        : bucket,
+    ),
+  };
+}
+
 function normalizeImportedDefinition(value: Partial<EditableDefinition>): EditableDefinition {
   return {
     schemaVersion: value.schemaVersion ?? STATE_MACHINE_SCHEMA_VERSION,
@@ -1170,9 +1970,22 @@ function normalizeImportedDefinition(value: Partial<EditableDefinition>): Editab
   };
 }
 
-function normalizeImportedWorkflowDefinition(value: Partial<EditableWorkflowDefinition>): EditableWorkflowDefinition {
+type ImportedWorkflowDefinition = Partial<Omit<EditableWorkflowDefinition, "schemaVersion" | "buckets">> & {
+  schemaVersion?: string;
+  buckets?: unknown;
+};
+
+function normalizeImportedWorkflowDefinition(
+  value: ImportedWorkflowDefinition,
+  fallbackStateMachine: EditableDefinition,
+): EditableWorkflowDefinition {
+  const embeddedStateMachineDefinition = value.embeddedStateMachineDefinition
+    ? normalizeImportedDefinition(value.embeddedStateMachineDefinition)
+    : undefined;
+  const effectiveStateMachine = embeddedStateMachineDefinition ?? fallbackStateMachine;
+
   return {
-    schemaVersion: value.schemaVersion ?? WORKFLOW_SCHEMA_VERSION,
+    schemaVersion: normalizeImportedWorkflowSchemaVersion(value.schemaVersion),
     appName: value.appName ?? "",
     workflowVersion: value.workflowVersion ?? "",
     id: value.id ?? "",
@@ -1180,11 +1993,34 @@ function normalizeImportedWorkflowDefinition(value: Partial<EditableWorkflowDefi
       id: value.stateMachine?.id ?? "",
       definitionVersion: value.stateMachine?.definitionVersion ?? "",
     },
-    embeddedStateMachineDefinition: value.embeddedStateMachineDefinition
-      ? normalizeImportedDefinition(value.embeddedStateMachineDefinition)
-      : undefined,
+    embeddedStateMachineDefinition,
     actions: Array.isArray(value.actions) ? value.actions : [],
+    buckets: normalizeImportedWorkflowBuckets(value.buckets, effectiveStateMachine.states),
   };
+}
+
+function normalizeImportedWorkflowSchemaVersion(schemaVersion: string | undefined): typeof WORKFLOW_SCHEMA_VERSION {
+  return (schemaVersion === "0.1.0" ? WORKFLOW_SCHEMA_VERSION : schemaVersion ?? WORKFLOW_SCHEMA_VERSION) as typeof WORKFLOW_SCHEMA_VERSION;
+}
+
+function normalizeImportedWorkflowBuckets(value: unknown, states: readonly string[]): WorkflowBucket<string>[] {
+  if (!Array.isArray(value)) {
+    return createDefaultWorkflowBuckets(states);
+  }
+
+  return value.map((bucket, index) => {
+    const bucketRecord = bucket && typeof bucket === "object" ? (bucket as Record<string, unknown>) : {};
+
+    return {
+      id: typeof bucketRecord.id === "string" ? bucketRecord.id : `bucket_${index + 1}`,
+      label: typeof bucketRecord.label === "string" ? bucketRecord.label : `Bucket ${index + 1}`,
+      states: Array.isArray(bucketRecord.states) ? bucketRecord.states.filter((state): state is string => typeof state === "string") : [],
+    };
+  });
+}
+
+function createDefaultWorkflowBuckets(states: readonly string[]): WorkflowBucket<string>[] {
+  return [{ id: "workflow", label: "Workflow", states: [...states] }];
 }
 
 function withCurrentStateMachineReference(

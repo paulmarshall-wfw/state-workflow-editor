@@ -2,7 +2,7 @@
 
 A TypeScript state-machine and workflow contract library with a browser-based definition editor.
 
-The state-machine layer is deliberately narrow. It owns valid states, allowed state-to-state transitions, terminal states, and definition validation. The workflow layer maps named app actions onto those valid transitions, but guards, side effects, persistence, authorization, jobs, retries, idempotency, and runtime orchestration remain app/runtime concerns.
+The state-machine layer is deliberately narrow. It owns valid states, allowed state-to-state transitions, terminal states, and definition validation. The workflow layer maps named app actions and workflow buckets onto those valid states and transitions, but guards, side effects, persistence, authorization, jobs, retries, idempotency, and runtime orchestration remain app/runtime concerns.
 
 ## Status
 
@@ -69,7 +69,7 @@ Workflow definitions keep their own `id` and `workflowVersion` separate. The lin
 
 ```json
 {
-  "schemaVersion": "0.1.0",
+  "schemaVersion": "0.2.0",
   "appName": "Example App",
   "workflowVersion": "0.1.0",
   "id": "scan_job_workflow",
@@ -84,9 +84,28 @@ Workflow definitions keep their own `id` and `workflowVersion` separate. The lin
       "from": "queued",
       "to": "running"
     }
+  ],
+  "buckets": [
+    {
+      "id": "waiting",
+      "label": "Waiting",
+      "states": ["queued"]
+    },
+    {
+      "id": "active",
+      "label": "Active",
+      "states": ["running", "failed"]
+    },
+    {
+      "id": "finished",
+      "label": "Finished",
+      "states": ["completed", "cancelled"]
+    }
   ]
 }
 ```
+
+Workflow buckets are exported contract metadata. Bucket IDs use lowercase snake_case, labels are required, and every state in the linked state-machine definition must be assigned to exactly one bucket.
 
 Linked workflow exports use:
 
@@ -108,7 +127,7 @@ Bundled workflow exports include `embeddedStateMachineDefinition` and use:
 - The app has State Machine, Workflow, and Settings pages.
 - The Target Project control includes a folder picker that updates both state-machine and workflow project names.
 - The State Machine page uses three independently scrolling columns: states, selected-state transitions, and a read-only Mermaid preview.
-- The Workflow page maps named action-button labels onto legal state-machine transitions, uses a fixed Selected State dropdown above the action rows, and previews action-labelled transitions.
+- The Workflow page has Actions and Buckets views. Actions maps named action-button labels onto legal state-machine transitions and uses a fixed Selected State dropdown above the action rows. Buckets lets users edit bucket names directly, add states to the selected bucket from an all-state dropdown, and remove states from the selected bucket. Both workflow views retain the action-labelled Mermaid preview.
 
 ## Core API
 
