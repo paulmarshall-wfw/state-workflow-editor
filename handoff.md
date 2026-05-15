@@ -2,80 +2,95 @@
 
 ## 1. Metadata
 
-- project name: State Workflow Engine
-- handoff type: implementation handoff
-- created timestamp in UTC: 2026-05-13T07:33:00Z
+- project name: State Workflow Editor
+- handoff type: implementation checkpoint
+- created timestamp in UTC: 2026-05-15T01:12:22Z
 - prepared by: Codex
 - repository, workspace, or folder: `/Users/paulmarshall/Software Development/state-workflow-engine`
 - branch or working context: `main`
-- session scope: bootstrap v0.0.1 state-machine core library and visual definition editor, then regularize repo baseline
+- session scope: State Workflow Editor expansion, app/package version bump to `0.0.2`, and committed checkpoint refresh
 
 ### Checkpoint Status
 
-- Git HEAD: current HEAD
-- Working tree: clean
-- Dirty files intentionally in scope: None
+- Git HEAD: `current HEAD after checkpoint commit`
+- Working tree: clean after checkpoint commit
+- Dirty files intentionally in scope: None after checkpoint commit
 - Dirty files intentionally out of scope: None
-- Untracked files intentionally in scope: None
+- Untracked files intentionally in scope: None after checkpoint commit
 - Untracked files intentionally out of scope: None
 - Canonical files described:
   - `README.md`
   - `AGENTS.md`
   - `package.json`
+  - `package-lock.json`
   - `src/lib/stateMachine.ts`
+  - `src/lib/workflow.ts`
   - `src/App.tsx`
   - `docs/plans/State Machine Core Library And Visual Definition Editor.md`
+  - `docs/plans/state-workflow-editor.md`
 - Last verification:
   - command: `npm run verify`
   - result: passed
-  - timestamp UTC: 2026-05-13T07:32:00Z
-- Handoff freshness: fresh-to-HEAD
-- Safe-to-continue basis: this handoff is committed with the v0.0.1 baseline and describes the committed source checkpoint
-- Next checkpoint action: verify before the next commit
+  - timestamp UTC: 2026-05-15T01:13:25Z
+- Handoff freshness: fresh-to-HEAD after checkpoint commit
+- Safe-to-continue basis: this handoff is committed with the app/package version bump and expanded editor changes described below
+- Next checkpoint action: continue from the clean committed checkpoint
 
 ## 2. Executive Summary
 
-The project is a TypeScript/Vite/React repo containing a reusable state-machine core and a browser-based visual editor. The core owns only valid states, allowed state-to-state transitions, terminal states, and validation. Workflow behavior remains explicitly out of scope.
+The project is a TypeScript/Vite/React repo containing a reusable state-machine core, a workflow contract layer, and a browser-based editor. The state-machine core owns valid states, allowed state-to-state transitions, terminal states, definition metadata, and validation. The workflow layer maps named app actions onto valid state transitions while keeping guards, authorization, side effects, persistence, jobs, retries, idempotency, and runtime orchestration out of scope.
 
-The v0.0.1 baseline is complete and safe to continue from after running `npm install` and `npm run verify`.
+The current checkpoint expands the app into `State Workflow Editor`, with State Machine, Workflow, and Settings pages. App/package version is `0.0.2`. State-machine definition exports remain separate from app versioning and still use definition schema `0.2.0`. Workflow definitions use workflow schema `0.1.0` and support both linked and bundled exports.
 
 ## 3. Current Objective
 
-Immediate goal: maintain and extend the state-machine definition tooling without mixing workflow semantics into the core.
+Immediate goal: checkpoint the expanded State Workflow Editor implementation, update the app/package version, refresh durable handoff context, verify, and commit all project changes.
 
-Intended finished state for this workstream: a committed, standards-compliant bootstrap baseline with clear verification and handoff context.
+Intended finished state: users can author state-machine definitions, author workflow action contracts against the loaded state-machine definition, select which state's workflow actions are visible from a fixed non-scrolling control area, pick a local project folder to fill slug-like Target Project values, preview both definition types with Mermaid, and export state-machine JSON, linked workflow JSON, or bundled workflow JSON.
 
-Definition of done: Git repo initialized, version set to `0.0.1`, baseline files present, verification passing, and all current changes committed.
+Definition of done: `npm run verify` passes and the checkpoint is committed.
 
 ## 4. Current State
 
 ### Working
 
 - Core validation and runtime helpers are implemented in `src/lib/stateMachine.ts`.
-- Visual editor supports state IDs, terminal toggles, transition rows, continuous validation, JSON import/export, and read-only graph preview.
-- Tests cover core behavior and key editor flows.
+- Definition schema is `0.2.0` and includes `appName`, `definitionVersion`, `id`, `states`, `terminalStates`, and `transitions`.
+- Workflow validation and helper APIs are implemented in `src/lib/workflow.ts`; workflow schema is `0.1.0`.
+- Visual editor supports State Machine, Workflow, and Settings pages.
+- State Machine page supports target project, folder-based slug project picking, state machine ID, state machine version, state IDs, terminal toggles, selected-state transition rows, continuous validation, JSON import/export, and read-only Mermaid graph preview.
+- Workflow page supports workflow metadata, folder-based slug project picking, linked state-machine reference display, fixed selected-state action filtering, visible action column headings, action-button label editing without duplicating action IDs in rows, workflow validation, linked workflow import/export, bundled workflow import/export, and action-labelled Mermaid preview.
+- Workflow actions header, Add Action button, selected state selector, and action column headings live in a compact non-scrolling container above the scrollable action rows.
+- Metadata field labels are positioned above their controls. State Machine fields are ordered Target Project, State Machine ID, State Machine Version. Workflow fields use the corresponding workflow ordering and labels.
+- Mermaid is a runtime UI dependency loaded dynamically by the preview component; it is not imported by the state-machine core and is not part of exported definition JSON.
+- Export uses `window.showSaveFilePicker` when available and falls back to browser download when unavailable.
+- App settings store configurable logo URL and light/dark theme in browser local storage.
+- Tests cover state-machine behavior, workflow behavior, metadata validation, settings logo persistence, theme switching, folder project picking, state-machine import/export, workflow linked/bundled import/export, selected-state transition editing, fixed selected-state workflow action filtering, workflow action editing, Mermaid source generation, mocked Mermaid preview rendering, and visible app version.
 - CI workflow is present and runs `npm ci` plus `npm run verify`.
 
 ### Partially Working
 
-- The graph is preview-only by design for v0.
+- The graphs are preview-only by design for v0.
+- Settings currently covers logo URL and theme persistence; broader editor preferences are not implemented yet.
 
 ### Not Working Yet
 
-- No workflow layer exists yet.
+- No generic workflow runtime exists yet.
 - No direct graph editing exists yet.
 - No package publishing or deployment flow exists yet.
 
 ### Not Yet Verified
 
-- Browser visual layout was not checked with Playwright because Playwright is not installed. Local HTTP smoke check passed during implementation.
+- Browser visual regression is not automated.
 
 ## 5. Active Constraints
 
 - Keep the state-machine core project-agnostic.
-- Do not add workflow actions, guards, side effects, authorization, persistence, logging, jobs, retries, or idempotency to the core without a new approved plan.
+- Do not add workflow guards, side effects, authorization, persistence, logging, jobs, retries, or idempotency to the state-machine core or workflow contract layer without a new approved plan.
+- Treat `schemaVersion` as the file-format version.
+- Treat `definitionVersion` as the user-controlled state definition version, separate from the app/package version.
 - Use numbered versions only.
-- Treat `package.json` as the version source of truth.
+- Treat `package.json` as the app/package version source of truth.
 - Run `npm run verify` before committing changes.
 
 ## 6. Commands and Verification
@@ -95,21 +110,22 @@ Latest verified command:
 npm run verify
 ```
 
-Result: passed. It ran TypeScript checking, 17 Vitest tests, and a Vite production build.
+Result: passed. It ran TypeScript checking, Vitest tests, and a Vite production build.
 
 ## 7. Files to Open First
 
 - `AGENTS.md`: repo-local standards and state/workflow boundary constraints.
-- `README.md`: current run, verify, structure, configuration, and versioning notes.
-- `src/lib/stateMachine.ts`: reusable state-machine core.
-- `src/App.tsx`: editor UI and import/export behavior.
-- `docs/plans/State Machine Core Library And Visual Definition Editor.md`: approved PRD behind the current baseline.
+- `README.md`: current run, verify, structure, configuration, definition format, editor layout, and versioning notes.
+- `src/lib/stateMachine.ts`: reusable state-machine core and definition validation.
+- `src/lib/workflow.ts`: workflow contract validation and helper APIs.
+- `src/App.tsx`: editor UI, settings page, state-machine and workflow import/export behavior, selected-state transitions, workflow actions, and save-picker fallback.
+- `docs/plans/state-workflow-editor.md`: PRD and implementation plan for the expanded editor.
 
 ## 8. Next Actions
 
 Next:
 
-- Decide whether the next workstream is workflow-layer design, editor usability improvements, or packaging the core as a reusable library artifact.
+- Continue from the clean committed checkpoint.
 
 Blocked:
 
@@ -122,4 +138,4 @@ Later:
 
 ## 9. Ready-Made Prompt for Starting a New Thread
 
-Read `handoff.md` as the hot-context source for current state. Review `AGENTS.md`, `README.md`, `src/lib/stateMachine.ts`, `src/App.tsx`, and the PRD in `docs/plans/State Machine Core Library And Visual Definition Editor.md` before changing code. Preserve the separation between the state-machine core and any future workflow layer. Run `npm run verify` before committing. Load `project-dossier.md` only if broader project history is explicitly needed; it is not required for the current baseline.
+Read `handoff.md` as the hot-context source for current state. Review `AGENTS.md`, `README.md`, `src/lib/stateMachine.ts`, `src/lib/workflow.ts`, `src/App.tsx`, and `docs/plans/state-workflow-editor.md` before changing code. Preserve the separation between the pure state-machine core, the workflow contract layer, and any future runtime workflow engine. App/package version is `0.0.2`; state-machine definition version remains user-controlled through `definitionVersion`. Run `npm run verify` before committing.

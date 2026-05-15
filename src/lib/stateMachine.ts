@@ -1,4 +1,4 @@
-export const STATE_MACHINE_SCHEMA_VERSION = "0.1.0" as const;
+export const STATE_MACHINE_SCHEMA_VERSION = "0.2.0" as const;
 
 export type StateMachineSchemaVersion = typeof STATE_MACHINE_SCHEMA_VERSION;
 
@@ -9,6 +9,8 @@ export type StateTransition<State extends string = string> = {
 
 export type StateMachineDefinition<State extends string = string> = {
   schemaVersion: StateMachineSchemaVersion;
+  appName: string;
+  definitionVersion: string;
   id: string;
   states: readonly State[];
   terminalStates: readonly State[];
@@ -17,6 +19,9 @@ export type StateMachineDefinition<State extends string = string> = {
 
 export type StateMachineValidationCode =
   | "invalid_schema_version"
+  | "missing_app_name"
+  | "missing_definition_version"
+  | "invalid_definition_version"
   | "missing_id"
   | "empty_states"
   | "invalid_state_id"
@@ -97,6 +102,28 @@ export function validateStateMachineDefinition<State extends string>(
       code: "missing_id",
       message: "State machine ID is required.",
       path: "id",
+    });
+  }
+
+  if (!definition.appName.trim()) {
+    errors.push({
+      code: "missing_app_name",
+      message: "App name is required.",
+      path: "appName",
+    });
+  }
+
+  if (!definition.definitionVersion.trim()) {
+    errors.push({
+      code: "missing_definition_version",
+      message: "State definition version is required.",
+      path: "definitionVersion",
+    });
+  } else if (!isValidDefinitionVersion(definition.definitionVersion)) {
+    errors.push({
+      code: "invalid_definition_version",
+      message: "State definition version must use a numbered SemVer value such as 0.1.0.",
+      path: "definitionVersion",
     });
   }
 
@@ -207,6 +234,8 @@ export function defineStateMachine<State extends string>(
   return {
     definition: {
       schemaVersion: definition.schemaVersion,
+      appName: definition.appName,
+      definitionVersion: definition.definitionVersion,
       id: definition.id,
       states: [...definition.states],
       terminalStates: [...definition.terminalStates],
@@ -279,4 +308,8 @@ function countValues(values: readonly string[]): Map<string, number> {
 
 function isValidStateId(state: string): boolean {
   return /^[a-z][a-z0-9_]*$/.test(state);
+}
+
+function isValidDefinitionVersion(version: string): boolean {
+  return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?$/.test(version);
 }

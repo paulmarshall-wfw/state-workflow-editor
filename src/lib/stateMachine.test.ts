@@ -14,6 +14,8 @@ import {
 
 const validDefinition = {
   schemaVersion: STATE_MACHINE_SCHEMA_VERSION,
+  appName: "Example App",
+  definitionVersion: "0.1.0",
   id: "scan_job_state",
   states: ["queued", "running", "completed", "failed", "cancelled"],
   terminalStates: ["completed", "cancelled"],
@@ -123,6 +125,26 @@ describe("validateStateMachineDefinition", () => {
     expect(result.errors).toContainEqual(
       expect.objectContaining({
         code: "empty_states",
+      }),
+    );
+  });
+
+  it("rejects missing app names and invalid definition versions", () => {
+    const result = validateStateMachineDefinition({
+      ...validDefinition,
+      appName: "",
+      definitionVersion: "draft",
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(
+      expect.objectContaining({
+        code: "missing_app_name",
+      }),
+    );
+    expect(result.errors).toContainEqual(
+      expect.objectContaining({
+        code: "invalid_definition_version",
       }),
     );
   });
