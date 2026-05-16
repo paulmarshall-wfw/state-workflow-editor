@@ -222,7 +222,7 @@ button:focus-visible {
 }
 
 .workflow-control-grid {
-  grid-template-columns: minmax(0, 1.55fr) minmax(360px, 0.9fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.48fr) minmax(340px, 0.82fr);
 }
 
 .workspace-grid {
@@ -269,6 +269,10 @@ button:focus-visible {
 
 .workflow-metadata-panel {
   grid-template-columns: minmax(220px, 1.25fr) minmax(170px, 1fr) minmax(140px, 0.7fr) minmax(170px, 1fr);
+}
+
+.compact-status-panel {
+  align-self: start;
 }
 
 .metadata-field {
@@ -793,6 +797,45 @@ button:focus-visible {
   margin-right: 6px;
 }
 
+.validation-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.validation-summary .valid-message,
+.validation-summary .error-message {
+  padding-right: 0;
+}
+
+.modal-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(8 12 16 / 58%);
+  padding: 24px;
+}
+
+.validation-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 48px));
+  overflow: hidden;
+}
+
+.dialog-heading {
+  align-items: flex-start;
+}
+
+.dialog-scroll {
+  min-height: 0;
+  overflow: auto;
+}
+
 .schema-version {
   color: var(--text-muted);
   font-size: 0.82rem;
@@ -946,6 +989,10 @@ button:focus-visible {
   }
 
   .workflow-state-control {
+    grid-template-columns: 1fr;
+  }
+
+  .validation-summary {
     grid-template-columns: 1fr;
   }
 

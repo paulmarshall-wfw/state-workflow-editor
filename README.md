@@ -6,12 +6,12 @@ The state-machine layer is deliberately narrow. It owns valid states, allowed st
 
 ## Status
 
-- Version: `0.0.2`
+- Version: `1.0.0`
 - Runtime: TypeScript, React, Vite, Mermaid
 - Storage: local file import/export only; exports use the File System Access API when supported and browser download fallback otherwise
 - App selection: Target App fields can be filled from a local folder picker when the browser supports directory selection
 - App settings: logo URL and light/dark theme are stored in browser local storage
-- Release state: private development baseline, not published
+- Release state: private `1.0.0` project checkpoint, not published
 
 ## Development
 
@@ -177,7 +177,14 @@ getActionTargetState(workflow, actionId);
 
 ## Configuration
 
-No environment variables are required for v0 local development. `.env.example` is included to make that explicit.
+No environment variables are required for local development. The Vite dev server defaults to `127.0.0.1:5174` with strict port binding.
+
+Optional overrides:
+
+```sh
+VITE_HOST=127.0.0.1
+VITE_PORT=5174
+```
 
 ## Versioning And Release
 

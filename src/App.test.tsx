@@ -102,6 +102,14 @@ function getWorkflowBucketLabelValues() {
     .map((input) => (input as HTMLInputElement).value);
 }
 
+type TestUser = ReturnType<typeof userEvent.setup>;
+
+async function openWorkflowValidationIssues(user: TestUser) {
+  await user.click(screen.getByRole("button", { name: "View Issues" }));
+
+  return screen.getByRole("dialog", { name: "Workflow Validation Issues" });
+}
+
 describe("App", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -143,7 +151,7 @@ describe("App", () => {
 
     expect(screen.getByRole("heading", { name: "State Workflow Editor" })).toBeInTheDocument();
     expect(screen.queryByText("State Machine Core")).not.toBeInTheDocument();
-    expect(screen.getByText("v0.0.2")).toBeInTheDocument();
+    expect(screen.getByText("v1.0.0")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Switch to dark mode" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "State Machine" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Workflow" })).toBeInTheDocument();
@@ -302,6 +310,7 @@ describe("App", () => {
   });
 
   it("imports a valid JSON definition", async () => {
+    const user = userEvent.setup();
     render(<App />);
 
     const json = JSON.stringify({
@@ -330,6 +339,11 @@ describe("App", () => {
     expect(screen.getByLabelText("State Machine Version")).toHaveValue("1.2.3");
     expect(screen.getByRole("textbox", { name: "State 1 ID" })).toHaveValue("draft");
     expect(screen.getByText("Valid")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+
+    expect(screen.getByLabelText("Target App")).toHaveValue("Article Manager");
+    expect(screen.getByLabelText("State Machine")).toHaveValue("article_state@1.2.3");
   });
 
   it("shows the state-machine import drop zone only on the State Machine page", async () => {
@@ -341,10 +355,12 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Workflow" }));
 
     expect(screen.queryByRole("button", { name: /State Machine JSON/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Workflow JSON/ })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Settings" }));
 
     expect(screen.queryByRole("button", { name: /State Machine JSON/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Workflow JSON/ })).not.toBeInTheDocument();
   });
 
   it("imports a valid state-machine JSON file from the drop zone", async () => {
@@ -379,6 +395,11 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "draft" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("Valid")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "State machine Mermaid preview" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Workflow" }));
+
+    expect(screen.getByLabelText("Target App")).toHaveValue("Article Manager");
+    expect(screen.getByLabelText("State Machine")).toHaveValue("article_state@1.2.3");
   });
 
   it("opens the existing state-machine file input from the drop zone and imports through it", async () => {
@@ -870,7 +891,7 @@ describe("App", () => {
     await user.click(within(queuedRow).getByRole("button", { name: "Remove" }));
 
     expect(within(mappingPanel).queryByText("queued")).not.toBeInTheDocument();
-    expect(screen.getByText('State "queued" must be assigned to one workflow bucket.')).toBeInTheDocument();
+    expect(within(await openWorkflowValidationIssues(user)).getByText('State "queued" must be assigned to one workflow bucket.')).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Export Workflow" })).toBeDisabled();
   });
 
@@ -921,7 +942,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Workflow" }));
     await user.clear(screen.getByRole("textbox", { name: "Action 1 label" }));
 
-    expect(screen.getByText(/needs a label/)).toBeInTheDocument();
+    expect(within(await openWorkflowValidationIssues(user)).getByText(/needs a label/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Export Workflow" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Export Bundled Workflow" })).toBeDisabled();
   });
@@ -942,14 +963,22 @@ describe("App", () => {
 
     await user.click(screen.getByLabelText("Action 1 visible"));
 
-    expect(screen.getByText('Automatic action "start" must be hidden from user controls.')).toBeInTheDocument();
+    expect(
+      within(await openWorkflowValidationIssues(user)).getByText('Automatic action "start" must be hidden from user controls.'),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Export Workflow" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Close workflow validation issues" }));
 
     await user.click(screen.getByLabelText("Action 1 visible"));
     await user.type(screen.getByLabelText("Action 1 handler key"), "Publish Photo");
 
-    expect(screen.getByText('Action "start" processing handler key must use lowercase letters, numbers, and underscores.')).toBeInTheDocument();
+    expect(
+      within(await openWorkflowValidationIssues(user)).getByText(
+        'Action "start" processing handler key must use lowercase letters, numbers, and underscores.',
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Export Workflow" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Close workflow validation issues" }));
 
     await user.clear(screen.getByLabelText("Action 1 handler key"));
     await user.type(screen.getByLabelText("Action 1 handler key"), "publish_photo");
@@ -967,13 +996,22 @@ describe("App", () => {
 
     await user.click(screen.getByLabelText("Bucket 1 visible"));
 
-    expect(screen.getByText('User-triggered action "start" must start from a state in a visible state and bucket.')).toBeInTheDocument();
+    expect(
+      within(await openWorkflowValidationIssues(user)).getByText(
+        'User-triggered action "start" must start from a state in a visible state and bucket.',
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Export Workflow" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Close workflow validation issues" }));
 
     await user.click(screen.getByLabelText("Bucket 1 visible"));
     await user.click(screen.getByLabelText("queued visible"));
 
-    expect(screen.getByText('User-triggered action "start" must start from a state in a visible state and bucket.')).toBeInTheDocument();
+    expect(
+      within(await openWorkflowValidationIssues(user)).getByText(
+        'User-triggered action "start" must start from a state in a visible state and bucket.',
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Export Workflow" })).toBeDisabled();
   });
 
@@ -1082,6 +1120,35 @@ describe("App", () => {
     expect(within(mappingPanel).getByText("queued")).toBeInTheDocument();
   });
 
+  it("imports linked workflow definitions from the workflow drop zone", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+
+    const json = JSON.stringify({
+      schemaVersion: "0.3.0",
+      appName: "Article Manager",
+      workflowVersion: "1.0.0",
+      id: "article_workflow",
+      stateMachine: { id: "scan_job_state", definitionVersion: "0.1.0" },
+      states: ["queued", "running", "completed", "failed", "cancelled"],
+      actions: [{ id: "start", label: "Start", from: "queued", to: "running", trigger: "user", visible: true }],
+      buckets: [{ id: "workflow", label: "Workflow", visible: true, states: ["queued", "running", "completed", "failed", "cancelled"] }],
+    });
+    const dropZone = screen.getByRole("button", { name: /Workflow JSON/ });
+
+    fireEvent.drop(dropZone, {
+      dataTransfer: createFileDataTransfer(createTextFile(json, "article-workflow.json", "application/json")),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workflow ID")).toHaveValue("article_workflow");
+    });
+    expect(screen.getByLabelText("Target App")).toHaveValue("Article Manager");
+    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeEnabled();
+  });
+
   it("imports bundled workflow definitions and loads the embedded state machine", async () => {
     render(<App />);
 
@@ -1124,5 +1191,78 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.queryByText("Rendering preview...")).not.toBeInTheDocument();
     });
+  });
+
+  it("imports bundled workflow definitions from the workflow drop zone", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+
+    const json = JSON.stringify({
+      schemaVersion: "0.3.0",
+      appName: "Article Manager",
+      workflowVersion: "1.0.0",
+      id: "article_workflow",
+      stateMachine: { id: "article_state", definitionVersion: "2.0.0" },
+      embeddedStateMachineDefinition: {
+        schemaVersion: "0.2.0",
+        appName: "Article Manager",
+        definitionVersion: "2.0.0",
+        id: "article_state",
+        states: ["draft", "published"],
+        terminalStates: ["published"],
+        transitions: [{ from: "draft", to: "published" }],
+      },
+      states: ["draft", "published"],
+      actions: [{ id: "publish", label: "Publish", from: "draft", to: "published", trigger: "user", visible: true }],
+      buckets: [{ id: "workflow", label: "Workflow", visible: true, states: ["draft", "published"] }],
+    });
+
+    fireEvent.drop(screen.getByRole("button", { name: /Workflow JSON/ }), {
+      dataTransfer: createFileDataTransfer(createTextFile(json, "article-workflow-bundled.json", "application/json")),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("State Machine")).toHaveValue("article_state@2.0.0");
+    });
+    expect(screen.getByLabelText("Workflow ID")).toHaveValue("article_workflow");
+    expect(screen.getByLabelText("Target App")).toHaveValue("Article Manager");
+
+    await user.click(screen.getByRole("button", { name: "State Machine" }));
+
+    expect(screen.getByLabelText("State Machine ID")).toHaveValue("article_state");
+  });
+
+  it("imports state-machine definitions from the workflow drop zone", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+
+    const json = JSON.stringify({
+      schemaVersion: "0.2.0",
+      appName: "Article Manager",
+      definitionVersion: "1.2.3",
+      id: "article_state",
+      states: ["draft", "published"],
+      terminalStates: ["published"],
+      transitions: [{ from: "draft", to: "published" }],
+    });
+
+    fireEvent.drop(screen.getByRole("button", { name: /Workflow JSON/ }), {
+      dataTransfer: createFileDataTransfer(createTextFile(json, "article-state.json", "application/json")),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("State Machine")).toHaveValue("article_state@1.2.3");
+    });
+    expect(screen.getByLabelText("Target App")).toHaveValue("Article Manager");
+    expect(screen.getByText("Imported state-machine definition.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "State Machine" }));
+
+    expect(screen.getByLabelText("Target App")).toHaveValue("Article Manager");
+    expect(screen.getByLabelText("State Machine ID")).toHaveValue("article_state");
   });
 });

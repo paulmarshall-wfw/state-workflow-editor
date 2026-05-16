@@ -8,6 +8,7 @@ import {
   WorkflowActionTrigger,
   WorkflowBucket,
   WorkflowDefinition,
+  WorkflowValidationError,
   defineStateMachine,
   defineWorkflow,
   validateStateMachineDefinition,
@@ -130,6 +131,7 @@ export function App() {
   const [selectedBucketId, setSelectedBucketId] = useState(initialWorkflowDefinition.buckets[0].id);
   const [draftStateBucketId, setDraftStateBucketId] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<ActivePage>("state-machine");
+  const [isWorkflowValidationDialogOpen, setWorkflowValidationDialogOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(loadAppSettings);
   const stateMachineFileInputRef = useRef<HTMLInputElement | null>(null);
   const workflowFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -177,6 +179,7 @@ export function App() {
   const workflowBuckets = linkedWorkflow.buckets.map((bucket, index) => ({ ...bucket, index }));
   const selectedBucket = workflowBuckets.find((bucket) => bucket.id === selectedBucketId) ?? workflowBuckets[0];
   const selectedBucketStates = selectedBucket?.states ?? [];
+  const workflowIssueCount = workflowValidation.valid ? 0 : workflowValidation.errors.length;
   const workflowStateVisibility = useMemo(() => {
     const visibility = new Map<string, boolean>();
 
@@ -202,6 +205,12 @@ export function App() {
       setDraftStateBucketId(null);
     }
   }, [draftStateBucketId, selectedBucketId]);
+
+  useEffect(() => {
+    if (workflowValidation.valid) {
+      setWorkflowValidationDialogOpen(false);
+    }
+  }, [workflowValidation.valid]);
 
   function updateId(id: string) {
     setDefinition((current) => ({ ...current, id }));
@@ -677,21 +686,31 @@ export function App() {
 
     try {
       const parsed = JSON.parse(await file.text()) as EditableDefinition;
-      const nextDefinition = normalizeImportedDefinition(parsed);
-      const result = validateStateMachineDefinition(nextDefinition);
-
-      if (!result.valid) {
-        setStateMachineMessage(`Invalid state-machine definition: ${result.errors.map((error) => error.message).join(" ")}`);
-        return;
-      }
-
-      setDefinition(nextDefinition);
-      setSelectedState(nextDefinition.states[0] ?? "");
-      setStateMachineMessage(null);
+      applyImportedStateMachineDefinition(parsed, setStateMachineMessage);
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Unable to parse the selected file.";
       setStateMachineMessage(`Invalid JSON. Choose a valid state-machine .json file. ${detail}`);
     }
+  }
+
+  function applyImportedStateMachineDefinition(
+    value: Partial<EditableDefinition>,
+    onMessage: (message: string | null) => void,
+    successMessage: string | null = null,
+  ) {
+    const nextDefinition = normalizeImportedDefinition(value);
+    const result = validateStateMachineDefinition(nextDefinition);
+
+    if (!result.valid) {
+      onMessage(`Invalid state-machine definition: ${result.errors.map((error) => error.message).join(" ")}`);
+      return false;
+    }
+
+    setDefinition(nextDefinition);
+    setSelectedState(nextDefinition.states[0] ?? "");
+    setWorkflow((current) => ({ ...current, appName: nextDefinition.appName }));
+    onMessage(successMessage);
+    return true;
   }
 
   async function importWorkflowDefinition(event: ChangeEvent<HTMLInputElement>) {
@@ -702,8 +721,27 @@ export function App() {
     }
 
     try {
-      const parsed = JSON.parse(await file.text()) as ImportedWorkflowDefinition;
-      const nextWorkflow = normalizeImportedWorkflowDefinition(parsed, definition);
+      await importWorkflowFile(file);
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  async function importWorkflowFile(file: File) {
+    if (!isJsonFile(file)) {
+      setWorkflowMessage("Unsupported file type. Choose a .json workflow or state-machine definition file.");
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(await file.text()) as unknown;
+
+      if (isImportedStateMachineDefinition(parsed)) {
+        applyImportedStateMachineDefinition(parsed, setWorkflowMessage, "Imported state-machine definition.");
+        return;
+      }
+
+      const nextWorkflow = normalizeImportedWorkflowDefinition(parsed as ImportedWorkflowDefinition, definition);
       const effectiveStateMachine = nextWorkflow.embeddedStateMachineDefinition ?? definition;
       const result = validateWorkflowDefinition(nextWorkflow, effectiveStateMachine);
 
@@ -721,9 +759,8 @@ export function App() {
       setSelectedBucketId(nextWorkflow.buckets[0]?.id ?? "");
       setWorkflowMessage(null);
     } catch (error) {
-      setWorkflowMessage(error instanceof Error ? error.message : "Unable to import workflow definition.");
-    } finally {
-      event.target.value = "";
+      const detail = error instanceof Error ? error.message : "Unable to parse the selected file.";
+      setWorkflowMessage(`Invalid JSON. Choose a valid workflow or state-machine .json file. ${detail}`);
     }
   }
 
@@ -850,7 +887,11 @@ export function App() {
               </div>
             </section>
 
-            <StateMachineImportDropZone
+            <JsonImportDropZone
+              title="State Machine JSON"
+              detail="Drop or choose a .json file"
+              titleId="state-machine-import-title"
+              detailId="state-machine-import-detail"
               onChooseFile={() => stateMachineFileInputRef.current?.click()}
               onImportFile={importStateMachineFile}
             />
@@ -989,29 +1030,52 @@ export function App() {
               </div>
             </section>
 
-            <section className="panel status-panel" aria-live="polite">
+            <JsonImportDropZone
+              title="Workflow JSON"
+              detail="Drop linked, bundled, or state-machine .json"
+              titleId="workflow-import-title"
+              detailId="workflow-import-detail"
+              onChooseFile={() => workflowFileInputRef.current?.click()}
+              onImportFile={importWorkflowFile}
+            />
+
+            <section className="panel status-panel compact-status-panel" aria-live="polite">
               <div className="panel-heading">
                 <h2>Workflow Validation</h2>
                 <span className={workflowValidation.valid ? "status ok" : "status error"}>
                   {workflowValidation.valid
                     ? "Valid"
-                    : `${workflowValidation.errors.length} issue${workflowValidation.errors.length === 1 ? "" : "s"}`}
+                    : `${workflowIssueCount} issue${workflowIssueCount === 1 ? "" : "s"}`}
                 </span>
               </div>
               {workflowMessage ? <p className="export-message">{workflowMessage}</p> : null}
-              {workflowValidation.valid ? (
-                <p className="valid-message">Ready to export linked or bundled workflow JSON.</p>
-              ) : (
-                <ul className="error-list">
-                  {workflowValidation.errors.map((error, index) => (
-                    <li key={`${error.code}-${error.path}-${index}`}>
-                      <strong>{error.path}</strong> {error.message}
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <div className="validation-summary">
+                <p className={workflowValidation.valid ? "valid-message" : "error-message"}>
+                  {workflowValidation.valid
+                    ? "Ready to export linked or bundled workflow JSON."
+                    : "Workflow export is blocked until the validation issues are fixed."}
+                </p>
+                {!workflowValidation.valid ? (
+                  <button
+                    type="button"
+                    className="secondary compact"
+                    onClick={() => setWorkflowValidationDialogOpen(true)}
+                    aria-haspopup="dialog"
+                  >
+                    View Issues
+                  </button>
+                ) : null}
+              </div>
             </section>
           </section>
+
+          {!workflowValidation.valid && isWorkflowValidationDialogOpen ? (
+            <WorkflowValidationDialog
+              issueCount={workflowIssueCount}
+              errors={workflowValidation.errors}
+              onClose={() => setWorkflowValidationDialogOpen(false)}
+            />
+          ) : null}
 
           <section className="workflow-editor-region">
             <section className="workflow-view-tabs" aria-label="Workflow editor view">
@@ -1194,6 +1258,66 @@ function TargetProjectPicker({ onClick }: { onClick: () => void }) {
   );
 }
 
+function WorkflowValidationDialog({
+  issueCount,
+  errors,
+  onClose,
+}: {
+  issueCount: number;
+  errors: WorkflowValidationError[];
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    document.addEventListener("keydown", closeOnEscape);
+
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="panel validation-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="workflow-validation-dialog-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="panel-heading dialog-heading">
+          <div>
+            <h2 id="workflow-validation-dialog-title">Workflow Validation Issues</h2>
+            <p className="panel-subtitle">
+              {issueCount} issue{issueCount === 1 ? "" : "s"} blocking workflow export
+            </p>
+          </div>
+          <button
+            type="button"
+            className="ghost compact"
+            onClick={onClose}
+            aria-label="Close workflow validation issues"
+          >
+            Close
+          </button>
+        </div>
+        <div className="dialog-scroll">
+          <ul className="error-list">
+            {errors.map((error, index) => (
+              <li key={`${error.code}-${error.path}-${index}`}>
+                <strong>{error.path}</strong> {error.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SettingsPage({
   logoUrl,
   onLogoUrlChange,
@@ -1222,10 +1346,18 @@ function SettingsPage({
   );
 }
 
-function StateMachineImportDropZone({
+function JsonImportDropZone({
+  title,
+  detail,
+  titleId,
+  detailId,
   onChooseFile,
   onImportFile,
 }: {
+  title: string;
+  detail: string;
+  titleId: string;
+  detailId: string;
   onChooseFile: () => void;
   onImportFile: (file: File) => Promise<void>;
 }) {
@@ -1261,7 +1393,7 @@ function StateMachineImportDropZone({
   }
 
   return (
-    <section className="panel import-panel" aria-labelledby="state-machine-import-title">
+    <section className="panel import-panel" aria-labelledby={titleId}>
       <button
         type="button"
         className={isDraggingFile ? "import-drop-zone dragging-file" : "import-drop-zone"}
@@ -1270,13 +1402,13 @@ function StateMachineImportDropZone({
         onDragOver={showFileDrop}
         onDragLeave={hideFileDrop}
         onDrop={dropFile}
-        aria-describedby="state-machine-import-detail"
+        aria-describedby={detailId}
       >
-        <span id="state-machine-import-title" className="import-drop-zone-title">
-          State Machine JSON
+        <span id={titleId} className="import-drop-zone-title">
+          {title}
         </span>
-        <span id="state-machine-import-detail" className="import-drop-zone-detail">
-          Drop or choose a .json file
+        <span id={detailId} className="import-drop-zone-detail">
+          {detail}
         </span>
       </button>
     </section>
@@ -2206,6 +2338,22 @@ function isJsonFile(file: File) {
 
 function hasExternalFiles(dataTransfer: DataTransfer) {
   return Array.from(dataTransfer.types).includes("Files") || dataTransfer.files.length > 0;
+}
+
+function isImportedStateMachineDefinition(value: unknown): value is Partial<EditableDefinition> {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return (
+    !("workflowVersion" in record) &&
+    !("actions" in record) &&
+    !("buckets" in record) &&
+    Array.isArray(record.states) &&
+    Array.isArray(record.transitions)
+  );
 }
 
 type ImportedWorkflowDefinition = Partial<Omit<EditableWorkflowDefinition, "schemaVersion" | "states" | "actions" | "buckets">> & {
