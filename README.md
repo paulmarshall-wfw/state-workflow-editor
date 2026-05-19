@@ -6,12 +6,12 @@ The state-machine layer is deliberately narrow. It owns valid states, allowed st
 
 ## Status
 
-- Version: `1.0.1`
+- Version: `1.0.2`
 - Runtime: TypeScript, React, Vite, Mermaid
 - Storage: local file import/export only; exports use the File System Access API when supported and browser download fallback otherwise
 - App selection: Target App fields can be filled from a local folder picker when the browser supports directory selection
 - App settings: logo URL and light/dark theme are stored in browser local storage
-- Release state: private `1.0.1` project checkpoint, not published
+- Release state: private `1.0.2` project checkpoint, not published
 
 ## Development
 
@@ -158,7 +158,7 @@ Failure handling, retries, logging, authorization, idempotency, persistence, job
 - The app has State Machine, Workflow, and Settings pages.
 - The Target App control includes a folder picker that updates both state-machine and workflow app names.
 - The State Machine page uses three independently scrolling columns: states, selected-state transitions, and a read-only Mermaid preview.
-- The Workflow page has Actions and Buckets views. Actions maps named action-button labels onto legal state-machine transitions and lets users set trigger mode, user visibility, and optional handler keys. Buckets lets users edit bucket names directly, toggle bucket visibility, add states to the selected bucket from an all-state dropdown, toggle workflow-level state visibility, and remove states from the selected bucket. Both workflow views retain the action-labelled Mermaid preview.
+- The Workflow page has Actions and Buckets views. Actions maps named action-button labels onto legal state-machine transitions and lets users set trigger mode, user visibility, and optional handler keys. Buckets lets users edit bucket names directly, toggle bucket visibility, add states to the selected bucket from an all-state dropdown, toggle workflow-level state visibility, and remove states from the selected bucket. Both workflow views retain the action-labelled Mermaid preview; in Buckets view, the selected bucket's states use solid boundaries while all other states use dotted boundaries.
 
 ## Core API
 

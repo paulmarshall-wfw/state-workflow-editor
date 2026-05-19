@@ -1,7 +1,7 @@
 {
   "manifestVersion": "1.1.0",
   "appKind": "localWebApp",
-  "appVersion": "1.0.1",
+  "appVersion": "1.0.2",
   "appId": "state-workflow-engine",
   "name": "State Workflow Editor",
   "description": "Local State Workflow Editor for authoring state-machine and workflow contract definitions.",

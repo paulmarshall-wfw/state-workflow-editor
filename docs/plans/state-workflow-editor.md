@@ -202,7 +202,7 @@ The workflow layer may validate action mappings, but must not enforce app author
   - Row-level Remove action that removes the state from the selected bucket and leaves it unassigned until mapped again
   - Retained workflow Mermaid preview pane
 - Add validation panel specific to workflow definitions.
-- Add Mermaid workflow preview using action labels on edges, for example:
+- Add Mermaid workflow preview using action labels on edges, and in Buckets view distinguish the selected bucket's states with solid boundaries while other states use dotted boundaries. Edge example:
   - `queued -->|start| running`
 - Disable workflow export when either the state-machine definition or workflow definition is invalid.
 
@@ -242,7 +242,7 @@ The workflow layer may validate action mappings, but must not enforce app author
   - workflow validation blocks export
   - linked workflow import/export uses the new workflow filename rule
   - bundled workflow import/export uses the bundled filename rule and embedded definition
-  - Mermaid workflow preview includes action-labelled directed transitions
+  - Mermaid workflow preview includes action-labelled directed transitions and bucket-focused boundary styling in Buckets view
 - Run `npm run verify`.
 
 ## Assumptions

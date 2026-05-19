@@ -1271,6 +1271,9 @@ export function App() {
                     <MermaidGraph
                       machine={definedWorkflow.stateMachine.definition}
                       workflow={definedWorkflow.definition}
+                      workflowFocusStateIds={
+                        selectedWorkflowView === "buckets" && selectedBucket ? selectedBucketStates : undefined
+                      }
                       theme={settings.theme}
                     />
                   ) : (
@@ -2039,18 +2042,23 @@ function StateSelect({
 function MermaidGraph({
   machine,
   workflow,
+  workflowFocusStateIds,
   theme,
 }: {
   machine: EditableDefinition;
   workflow?: EditableWorkflowDefinition;
+  workflowFocusStateIds?: readonly string[];
   theme: MermaidPreviewTheme;
 }) {
   const [svg, setSvg] = useState("");
   const [renderError, setRenderError] = useState<string | null>(null);
   const renderId = useRef<string | null>(null);
   const diagram = useMemo(
-    () => (workflow ? buildWorkflowMermaidDiagram(machine, workflow, theme) : buildMermaidDiagram(machine, theme)),
-    [machine, workflow, theme],
+    () =>
+      workflow
+        ? buildWorkflowMermaidDiagram(machine, workflow, theme, workflowFocusStateIds)
+        : buildMermaidDiagram(machine, theme),
+    [machine, workflow, theme, workflowFocusStateIds],
   );
 
   if (!renderId.current) {
@@ -2652,9 +2660,13 @@ export function buildWorkflowMermaidDiagram(
   machine: EditableDefinition,
   workflow: EditableWorkflowDefinition,
   theme: MermaidPreviewTheme = "light",
+  focusStateIds?: readonly string[],
 ): string {
   const palette = getMermaidPreviewPalette(theme);
   const lines = ["flowchart LR"];
+  const isFocusedPreview = focusStateIds !== undefined;
+  const focusStateSet = new Set(focusStateIds ?? []);
+  const terminalStateSet = new Set(machine.terminalStates);
 
   for (const state of machine.states) {
     lines.push(`  ${state}["${state}"]`);
@@ -2664,18 +2676,54 @@ export function buildWorkflowMermaidDiagram(
     lines.push(`  ${action.from} -->|${escapeMermaidLabel(action.id)}| ${action.to}`);
   }
 
-  if (machine.states.length > 0) {
+  if (machine.states.length > 0 && !isFocusedPreview) {
     lines.push(
       `  classDef state fill:${palette.stateFill},stroke:${palette.stateStroke},stroke-width:2px,color:${palette.text};`,
     );
     lines.push(`  class ${machine.states.join(",")} state;`);
   }
 
-  if (machine.terminalStates.length > 0) {
+  if (machine.terminalStates.length > 0 && !isFocusedPreview) {
     lines.push(
       `  classDef terminal fill:${palette.stateFill},stroke:${palette.terminalStroke},stroke-width:3px,color:${palette.text};`,
     );
     lines.push(`  class ${machine.terminalStates.join(",")} terminal;`);
+  }
+
+  if (isFocusedPreview && machine.states.length > 0) {
+    const focusedStates = machine.states.filter((state) => focusStateSet.has(state) && !terminalStateSet.has(state));
+    const focusedTerminalStates = machine.states.filter((state) => focusStateSet.has(state) && terminalStateSet.has(state));
+    const unfocusedStates = machine.states.filter((state) => !focusStateSet.has(state) && !terminalStateSet.has(state));
+    const unfocusedTerminalStates = machine.states.filter((state) => !focusStateSet.has(state) && terminalStateSet.has(state));
+
+    lines.push(
+      `  classDef state fill:${palette.stateFill},stroke:${palette.stateStroke},stroke-width:2px,color:${palette.text};`,
+    );
+    lines.push(
+      `  classDef terminal fill:${palette.stateFill},stroke:${palette.terminalStroke},stroke-width:3px,color:${palette.text};`,
+    );
+    lines.push(
+      `  classDef unfocusedState fill:${palette.stateFill},stroke:${palette.stateStroke},stroke-width:2px,stroke-dasharray:2 3,color:${palette.text};`,
+    );
+    lines.push(
+      `  classDef unfocusedTerminal fill:${palette.stateFill},stroke:${palette.terminalStroke},stroke-width:3px,stroke-dasharray:2 3,color:${palette.text};`,
+    );
+
+    if (focusedStates.length > 0) {
+      lines.push(`  class ${focusedStates.join(",")} state;`);
+    }
+
+    if (focusedTerminalStates.length > 0) {
+      lines.push(`  class ${focusedTerminalStates.join(",")} terminal;`);
+    }
+
+    if (unfocusedStates.length > 0) {
+      lines.push(`  class ${unfocusedStates.join(",")} unfocusedState;`);
+    }
+
+    if (unfocusedTerminalStates.length > 0) {
+      lines.push(`  class ${unfocusedTerminalStates.join(",")} unfocusedTerminal;`);
+    }
   }
 
   return lines.join("\n");

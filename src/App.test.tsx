@@ -108,6 +108,13 @@ function queryWorkflowBucketLabelValues() {
     .map((input) => (input as HTMLInputElement).value);
 }
 
+async function getLastRenderedMermaidSource() {
+  const { default: mermaid } = await import("mermaid");
+  const renderMock = vi.mocked(mermaid.render);
+
+  return String(renderMock.mock.calls.at(-1)?.[1] ?? "");
+}
+
 type TestUser = ReturnType<typeof userEvent.setup>;
 
 async function openWorkflowValidationIssues(user: TestUser) {
@@ -157,7 +164,7 @@ describe("App", () => {
 
     expect(screen.getByRole("heading", { name: "State Workflow Editor" })).toBeInTheDocument();
     expect(screen.queryByText("State Machine Core")).not.toBeInTheDocument();
-    expect(screen.getByText("v1.0.1")).toBeInTheDocument();
+    expect(screen.getByText("v1.0.2")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Switch to dark mode" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "State Machine" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Workflow" })).toBeInTheDocument();
@@ -220,6 +227,53 @@ describe("App", () => {
     } as const;
 
     expect(buildWorkflowMermaidDiagram(definition, workflow)).toContain("queued -->|start| running");
+  });
+
+  it("generates focused workflow Mermaid source with dotted non-bucket states", () => {
+    const definition = {
+      schemaVersion: "0.2.0",
+      appName: "Example Project",
+      definitionVersion: "0.1.0",
+      id: "scan_job_state",
+      states: ["queued", "running", "completed"],
+      terminalStates: ["completed"],
+      transitions: [
+        { from: "queued", to: "running" },
+        { from: "running", to: "completed" },
+      ],
+    } as const;
+    const workflow = {
+      schemaVersion: "0.4.0",
+      appName: "Example Project",
+      workflowVersion: "0.1.0",
+      id: "scan_job_workflow",
+      stateMachine: { id: "scan_job_state", definitionVersion: "0.1.0" },
+      states: [
+        { id: "queued", visible: true },
+        { id: "running", visible: true },
+        { id: "completed", visible: true },
+      ],
+      actions: [
+        { id: "start", label: "Start", from: "queued", to: "running", trigger: "user", visible: true },
+        { id: "complete", label: "Complete", from: "running", to: "completed", trigger: "user", visible: true },
+      ],
+      buckets: [{ id: "waiting", label: "Waiting", visible: true, states: ["queued"] }],
+    } as const;
+    const defaultSource = buildWorkflowMermaidDiagram(definition, workflow);
+    const focusedSource = buildWorkflowMermaidDiagram(definition, workflow, "light", ["queued"]);
+    const focusedTerminalSource = buildWorkflowMermaidDiagram(definition, workflow, "light", ["completed"]);
+
+    expect(defaultSource).toContain("queued -->|start| running");
+    expect(defaultSource).toContain("class queued,running,completed state;");
+    expect(defaultSource).toContain("class completed terminal;");
+    expect(defaultSource).not.toContain("unfocusedState");
+    expect(focusedSource).toContain("queued -->|start| running");
+    expect(focusedSource).toContain("class queued state;");
+    expect(focusedSource).toContain("class running unfocusedState;");
+    expect(focusedSource).toContain("class completed unfocusedTerminal;");
+    expect(focusedSource).toContain("stroke-dasharray:2 3");
+    expect(focusedTerminalSource).toContain("class completed terminal;");
+    expect(focusedTerminalSource).toContain("class queued,running unfocusedState;");
   });
 
   it("toggles and persists light and dark mode from the icon beside the app name", async () => {
@@ -915,6 +969,39 @@ describe("App", () => {
     expect(within(mappingPanel).queryByText("queued")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Export Workflow" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "View Issues" })).not.toBeInTheDocument();
+  });
+
+  it("focuses workflow preview styling on the selected bucket only in buckets view", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+
+    await waitFor(async () => {
+      const source = await getLastRenderedMermaidSource();
+
+      expect(source).toContain("class queued,running,completed,failed,cancelled state;");
+      expect(source).not.toContain("unfocusedState");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Buckets" }));
+
+    await waitFor(async () => {
+      const source = await getLastRenderedMermaidSource();
+
+      expect(source).toContain("class queued state;");
+      expect(source).toContain("class running,failed unfocusedState;");
+      expect(source).toContain("class completed,cancelled unfocusedTerminal;");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+
+    await waitFor(async () => {
+      const source = await getLastRenderedMermaidSource();
+
+      expect(source).toContain("class queued,running,completed,failed,cancelled state;");
+      expect(source).not.toContain("unfocusedState");
+    });
   });
 
   it("reorders workflow buckets by dragging while preserving the selected bucket mapping", async () => {
