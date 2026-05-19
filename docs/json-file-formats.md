@@ -20,6 +20,8 @@ Current exported file-format versions:
 
 All export paths write formatted JSON with a trailing newline. The editor uses the File System Access API when available and falls back to a browser download.
 
+Browser-local Library storage uses IndexedDB records keyed from definition IDs and versions, but those storage keys are not part of the exported JSON formats.
+
 ## Common Rules
 
 - IDs use lowercase letters, numbers, and underscores, and must start with a lowercase letter.
@@ -287,6 +289,26 @@ A bundled workflow definition has the same workflow fields as a linked workflow 
 
 Bundled workflow imports validate the embedded state-machine definition and load it when valid. The workflow `stateMachine.id` and `stateMachine.definitionVersion` must match the embedded state-machine definition.
 
+## Local Library Storage
+
+The browser-local Library stores the current workspace draft plus explicitly saved definitions. Library records use `storageSchemaVersion: 1` internally. This metadata is not emitted by Export State Machine, Export Workflow, or Export Bundled Workflow.
+
+Saved state-machine records use:
+
+```text
+stateMachine:(state-machine-id)@(definition-version)
+```
+
+Saved workflow records use:
+
+```text
+workflow:(state-machine-id)@(definition-version)/(workflow-id)@(workflow-version)
+```
+
+The workflow key is scoped to the exact state-machine version in `workflow.stateMachine`. The app does not resolve workflows to a later or latest state-machine version automatically.
+
+Valid imports update the current workspace draft. They are not saved as Library records until the user explicitly saves the state-machine or workflow definition.
+
 ## Import Behavior
 
 ### State Machine Import
@@ -326,4 +348,3 @@ Legacy normalization rules:
 - legacy `action.processing.handlerKey` values become `before_transition` lifecycle hooks unless an explicit hook already exists for the same action
 
 New exports always use workflow schema `0.5.0`, always omit action-level `processing`, and always include `buckets` and `hooks` arrays.
-

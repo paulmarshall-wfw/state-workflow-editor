@@ -22,6 +22,11 @@ const originalShowDirectoryPicker = (
     showDirectoryPicker?: unknown;
   }
 ).showDirectoryPicker;
+const originalIndexedDb = (
+  window as Window & {
+    indexedDB?: unknown;
+  }
+).indexedDB;
 
 function createProjectDirectoryHandle(name: string, files: Record<string, string> = {}) {
   return {
@@ -82,6 +87,150 @@ function createTextFile(contents: string, name: string, type = "application/json
   });
 
   return file;
+}
+
+function createFakeIndexedDb(): IDBFactory {
+  const database = new FakeDatabase();
+
+  return {
+    open: () => {
+      const request = new FakeOpenRequest(database);
+
+      queueMicrotask(() => {
+        request.result = database as unknown as IDBDatabase;
+        request.transaction = new FakeTransaction(database) as unknown as IDBTransaction;
+        request.onupgradeneeded?.({} as IDBVersionChangeEvent);
+        request.onsuccess?.({} as Event);
+      });
+
+      return request as unknown as IDBOpenDBRequest;
+    },
+  } as unknown as IDBFactory;
+}
+
+class FakeOpenRequest {
+  result!: IDBDatabase;
+  transaction: IDBTransaction | null = null;
+  onsuccess: ((event: Event) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  onblocked: ((event: Event) => void) | null = null;
+  onupgradeneeded: ((event: IDBVersionChangeEvent) => void) | null = null;
+  error: DOMException | null = null;
+
+  constructor(readonly database: FakeDatabase) {}
+}
+
+class FakeRequest<Result> {
+  result!: Result;
+  onsuccess: ((event: Event) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  error: DOMException | null = null;
+
+  succeed(result: Result) {
+    queueMicrotask(() => {
+      this.result = result;
+      this.onsuccess?.({} as Event);
+    });
+  }
+}
+
+class FakeDatabase {
+  readonly stores = new Map<string, FakeObjectStore>();
+  readonly objectStoreNames = {
+    contains: (name: string) => this.stores.has(name),
+  };
+
+  createObjectStore(name: string) {
+    const store = new FakeObjectStore();
+    this.stores.set(name, store);
+    return store as unknown as IDBObjectStore;
+  }
+
+  transaction(storeName: string) {
+    return new FakeTransaction(this, storeName) as unknown as IDBTransaction;
+  }
+}
+
+class FakeTransaction {
+  oncomplete: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onabort: (() => void) | null = null;
+  error: DOMException | null = null;
+
+  constructor(
+    private readonly database: FakeDatabase,
+    private readonly storeName?: string,
+  ) {
+    queueMicrotask(() => this.oncomplete?.());
+  }
+
+  objectStore(name = this.storeName ?? "") {
+    const store = this.database.stores.get(name);
+
+    if (!store) {
+      throw new Error(`Missing fake object store: ${name}`);
+    }
+
+    return store as unknown as IDBObjectStore;
+  }
+}
+
+class FakeObjectStore {
+  readonly records = new Map<string, unknown>();
+  readonly indexNames = {
+    contains: (name: string) => name === "stateMachineKey",
+  };
+
+  createIndex() {
+    return {} as IDBIndex;
+  }
+
+  get(key: IDBValidKey) {
+    const request = new FakeRequest<unknown>();
+    request.succeed(cloneJson(this.records.get(String(key))));
+    return request as unknown as IDBRequest;
+  }
+
+  getAll() {
+    const request = new FakeRequest<unknown[]>();
+    request.succeed(Array.from(this.records.values()).map(cloneJson));
+    return request as unknown as IDBRequest;
+  }
+
+  put(record: { key: string }) {
+    const request = new FakeRequest<IDBValidKey>();
+    this.records.set(record.key, cloneJson(record));
+    request.succeed(record.key);
+    return request as unknown as IDBRequest;
+  }
+
+  delete(key: IDBValidKey) {
+    const request = new FakeRequest<undefined>();
+    this.records.delete(String(key));
+    request.succeed(undefined);
+    return request as unknown as IDBRequest;
+  }
+
+  index() {
+    return {
+      getAll: (stateMachineKey: IDBValidKey) => {
+        const request = new FakeRequest<unknown[]>();
+        const records = Array.from(this.records.values()).filter(
+          (record) => (record as { stateMachineKey?: string }).stateMachineKey === String(stateMachineKey),
+        );
+        request.succeed(records.map(cloneJson));
+        return request as unknown as IDBRequest;
+      },
+    } as IDBIndex;
+  }
+}
+
+function cloneJson<Value>(value: Value): Value {
+  if (value === undefined) {
+    return value;
+  }
+
+  return JSON.parse(JSON.stringify(value)) as Value;
 }
 
 function getStateInputValues() {
@@ -155,6 +304,18 @@ describe("App", () => {
         }
       ).showDirectoryPicker;
     }
+    if (originalIndexedDb) {
+      Object.defineProperty(window, "indexedDB", {
+        configurable: true,
+        value: originalIndexedDb,
+      });
+    } else {
+      delete (
+        window as unknown as {
+          indexedDB?: unknown;
+        }
+      ).indexedDB;
+    }
     localStorage.clear();
     delete document.documentElement.dataset.theme;
   });
@@ -164,7 +325,7 @@ describe("App", () => {
 
     expect(screen.getByRole("heading", { name: "State Workflow Editor" })).toBeInTheDocument();
     expect(screen.queryByText("State Machine Core")).not.toBeInTheDocument();
-    expect(screen.getByText("v1.0.3")).toBeInTheDocument();
+    expect(screen.getByText("v1.0.4")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Switch to dark mode" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "State Machine" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Workflow" })).toBeInTheDocument();
@@ -175,6 +336,31 @@ describe("App", () => {
     expect(screen.getByRole("img", { name: "State machine Mermaid preview" })).toBeInTheDocument();
     expect(await screen.findByTestId("mock-mermaid-svg")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Export State Machine" })).toBeEnabled();
+  });
+
+  it("saves state-machine and workflow definitions through the Library page", async () => {
+    Object.defineProperty(window, "indexedDB", {
+      configurable: true,
+      value: createFakeIndexedDb(),
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Library" }));
+    expect(screen.getByText("stateMachine:scan_job_state@0.1.0")).toBeInTheDocument();
+    expect(screen.getByText("workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save State Machine" }));
+    expect(await screen.findByText("Saved state machine stateMachine:scan_job_state@0.1.0.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save Workflow" }));
+    expect(
+      await screen.findByText("Saved workflow workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Saved state machines" })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Saved workflows" })).toBeInTheDocument();
+    expect(screen.getByText("scan_job_workflow")).toBeInTheDocument();
   });
 
   it("generates Mermaid source with directed transitions and terminal-state styling", () => {

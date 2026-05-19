@@ -1,8 +1,11 @@
-import { ChangeEvent, DragEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import packageJson from "../package.json";
 import {
+  CURRENT_WORKSPACE_DRAFT_KEY,
   STATE_MACHINE_SCHEMA_VERSION,
   WORKFLOW_SCHEMA_VERSION,
+  PersistedStateMachineDefinition,
+  PersistedWorkflowDefinition,
   StateMachineDefinition,
   WorkflowAction,
   WorkflowActionTrigger,
@@ -11,6 +14,10 @@ import {
   WorkflowLifecycleHook,
   WorkflowLifecyclePhase,
   WorkflowValidationError,
+  buildStateMachineDefinitionKey,
+  buildWorkflowDefinitionKey,
+  buildWorkflowStateMachineKey,
+  createDefinitionLibraryStorage,
   defineStateMachine,
   defineWorkflow,
   validateStateMachineDefinition,
@@ -80,7 +87,7 @@ type WorkflowReconciliationSummary = {
   removedHooks: number;
 };
 
-type ActivePage = "state-machine" | "workflow" | "settings";
+type ActivePage = "state-machine" | "workflow" | "library" | "settings";
 type WorkflowEditorView = "actions" | "buckets" | "lifecycle";
 
 type MermaidPreviewTheme = AppSettings["theme"];
@@ -163,8 +170,21 @@ export function App() {
   const [activePage, setActivePage] = useState<ActivePage>("state-machine");
   const [isWorkflowValidationDialogOpen, setWorkflowValidationDialogOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(loadAppSettings);
+  const [libraryMessage, setLibraryMessage] = useState<string | null>(null);
+  const [stateMachineRecords, setStateMachineRecords] = useState<PersistedStateMachineDefinition[]>([]);
+  const [workflowRecords, setWorkflowRecords] = useState<PersistedWorkflowDefinition[]>([]);
+  const [selectedLibraryStateMachineKey, setSelectedLibraryStateMachineKey] = useState<string | null>(null);
+  const [isLibraryReady, setLibraryReady] = useState(false);
   const stateMachineFileInputRef = useRef<HTMLInputElement | null>(null);
   const workflowFileInputRef = useRef<HTMLInputElement | null>(null);
+  const lastDraftSignatureRef = useRef<string | null>(null);
+  const storage = useMemo(() => {
+    if (!("indexedDB" in window) || !window.indexedDB) {
+      return null;
+    }
+
+    return createDefinitionLibraryStorage(window.indexedDB);
+  }, []);
   const validation = useMemo(() => validateStateMachineDefinition(definition), [definition]);
   const machine = useMemo(() => {
     if (!validation.valid) {
@@ -222,10 +242,135 @@ export function App() {
 
     return visibility;
   }, [linkedWorkflow.states]);
+  const currentStateMachineKey = buildStateMachineDefinitionKey(definition);
+  const currentWorkflowKey = buildWorkflowDefinitionKey(linkedWorkflow);
+  const selectedLibraryStateMachine =
+    stateMachineRecords.find((record) => record.key === selectedLibraryStateMachineKey) ?? stateMachineRecords[0] ?? null;
+  const selectedLibraryWorkflows = selectedLibraryStateMachine
+    ? workflowRecords.filter((record) => record.stateMachineKey === selectedLibraryStateMachine.key)
+    : [];
+
+  const refreshLibrary = useCallback(
+    async (nextSelectedStateMachineKey?: string | null) => {
+      if (!storage) {
+        setLibraryReady(true);
+        setLibraryMessage("Local definition library is not available in this browser.");
+        return;
+      }
+
+      const [nextStateMachineRecords, nextWorkflowRecords] = await Promise.all([
+        storage.listStateMachineDefinitions(),
+        storage.listWorkflowDefinitions(),
+      ]);
+
+      setStateMachineRecords(nextStateMachineRecords);
+      setWorkflowRecords(nextWorkflowRecords);
+      setSelectedLibraryStateMachineKey((current) => {
+        if (nextSelectedStateMachineKey !== undefined) {
+          return nextSelectedStateMachineKey;
+        }
+
+        if (current && nextStateMachineRecords.some((record) => record.key === current)) {
+          return current;
+        }
+
+        return nextStateMachineRecords[0]?.key ?? null;
+      });
+      setLibraryReady(true);
+    },
+    [storage],
+  );
 
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
   }, [settings.theme]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInitialLibraryState() {
+      if (!storage) {
+        setLibraryReady(true);
+        setLibraryMessage("Local definition library is not available in this browser.");
+        return;
+      }
+
+      try {
+        const draft = await storage.loadCurrentWorkspaceDraft();
+
+        if (cancelled) {
+          return;
+        }
+
+        if (draft?.key === CURRENT_WORKSPACE_DRAFT_KEY) {
+          setDefinition(draft.definition);
+          setWorkflow(removeEmbeddedStateMachine(draft.workflow));
+          setSelectedState(draft.definition.states[0] ?? "");
+          setSelectedBucketId(draft.workflow.buckets[0]?.id ?? "");
+          setSelectedLifecycleHookId(draft.workflow.hooks[0]?.id ?? null);
+
+          if (draft.activePage === "state-machine" || draft.activePage === "workflow" || draft.activePage === "library" || draft.activePage === "settings") {
+            setActivePage(draft.activePage);
+          }
+
+          if (draft.selectedWorkflowView === "actions" || draft.selectedWorkflowView === "buckets" || draft.selectedWorkflowView === "lifecycle") {
+            setSelectedWorkflowView(draft.selectedWorkflowView);
+          }
+
+          lastDraftSignatureRef.current = buildDraftSignature(
+            draft.definition,
+            removeEmbeddedStateMachine(draft.workflow),
+            draft.activePage,
+            draft.selectedWorkflowView,
+          );
+        }
+
+        await refreshLibrary();
+      } catch (error) {
+        if (!cancelled) {
+          setLibraryReady(true);
+          setLibraryMessage(error instanceof Error ? error.message : "Unable to open local definition library.");
+        }
+      }
+    }
+
+    void loadInitialLibraryState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshLibrary, storage]);
+
+  useEffect(() => {
+    if (!storage || !isLibraryReady) {
+      return;
+    }
+
+    const draftWorkflow = removeEmbeddedStateMachine(linkedWorkflow);
+    const signature = buildDraftSignature(definition, draftWorkflow, activePage, selectedWorkflowView);
+
+    if (signature === lastDraftSignatureRef.current) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      storage
+        .saveCurrentWorkspaceDraft({
+          definition,
+          workflow: draftWorkflow,
+          activePage,
+          selectedWorkflowView,
+        })
+        .then(() => {
+          lastDraftSignatureRef.current = signature;
+        })
+        .catch((error) => {
+          setLibraryMessage(error instanceof Error ? error.message : "Unable to autosave the current workspace.");
+        });
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [activePage, definition, isLibraryReady, linkedWorkflow, selectedWorkflowView, storage]);
 
   useEffect(() => {
     if (workflow.buckets.length > 0 && !workflow.buckets.some((bucket) => bucket.id === selectedBucketId)) {
@@ -787,6 +932,294 @@ export function App() {
     setWorkflowMessage("Workflow reset from current state machine.");
   }
 
+  async function saveCurrentStateMachineToLibrary() {
+    if (!storage) {
+      setLibraryMessage("Local definition library is not available in this browser.");
+      return;
+    }
+
+    if (!validation.valid) {
+      setLibraryMessage("Fix state-machine validation issues before saving to the Library.");
+      return;
+    }
+
+    try {
+      const existing = await storage.getStateMachineDefinition(currentStateMachineKey);
+
+      if (existing && !window.confirm(`Replace saved state machine ${currentStateMachineKey}?`)) {
+        setLibraryMessage("State-machine save cancelled.");
+        return;
+      }
+
+      const saved = await storage.saveStateMachineDefinition(definition);
+      await refreshLibrary(saved.key);
+      setLibraryMessage(`Saved state machine ${saved.key}.`);
+    } catch (error) {
+      setLibraryMessage(error instanceof Error ? error.message : "Unable to save state machine to the Library.");
+    }
+  }
+
+  async function saveCurrentWorkflowToLibrary() {
+    if (!storage) {
+      setLibraryMessage("Local definition library is not available in this browser.");
+      return;
+    }
+
+    if (!workflowValidation.valid) {
+      setLibraryMessage("Fix workflow validation issues before saving to the Library.");
+      return;
+    }
+
+    try {
+      const stateMachineKey = buildWorkflowStateMachineKey(linkedWorkflow.stateMachine);
+      const linkedStateMachine = await storage.getStateMachineDefinition(stateMachineKey);
+
+      if (!linkedStateMachine) {
+        setLibraryMessage(`Save linked state machine ${stateMachineKey} before saving this workflow.`);
+        return;
+      }
+
+      const existing = await storage.getWorkflowDefinition(currentWorkflowKey);
+
+      if (existing && !window.confirm(`Replace saved workflow ${currentWorkflowKey}?`)) {
+        setLibraryMessage("Workflow save cancelled.");
+        return;
+      }
+
+      const saved = await storage.saveWorkflowDefinition(removeEmbeddedStateMachine(linkedWorkflow));
+      await refreshLibrary(saved.stateMachineKey);
+      setLibraryMessage(`Saved workflow ${saved.key}.`);
+    } catch (error) {
+      setLibraryMessage(error instanceof Error ? error.message : "Unable to save workflow to the Library.");
+    }
+  }
+
+  async function loadStateMachineFromLibrary(key: string) {
+    if (!storage) {
+      setLibraryMessage("Local definition library is not available in this browser.");
+      return;
+    }
+
+    try {
+      const record = await storage.getStateMachineDefinition(key);
+
+      if (!record) {
+        setLibraryMessage(`State machine ${key} is no longer saved.`);
+        await refreshLibrary();
+        return;
+      }
+
+      const result = validateStateMachineDefinition(record.definition);
+
+      if (!result.valid) {
+        setLibraryMessage(`Saved state machine is invalid: ${result.errors.map((error) => error.message).join(" ")}`);
+        return;
+      }
+
+      const nextWorkflow = resetWorkflowFromStateMachine(workflow, record.definition);
+
+      setDefinition(record.definition);
+      setSelectedState(record.definition.states[0] ?? "");
+      setWorkflow(nextWorkflow);
+      setSelectedBucketId(nextWorkflow.buckets[0]?.id ?? "");
+      setSelectedLifecycleHookId(null);
+      setActivePage("state-machine");
+      setLibraryMessage(`Loaded state machine ${record.key}.`);
+    } catch (error) {
+      setLibraryMessage(error instanceof Error ? error.message : "Unable to load state machine from the Library.");
+    }
+  }
+
+  async function loadWorkflowFromLibrary(key: string) {
+    if (!storage) {
+      setLibraryMessage("Local definition library is not available in this browser.");
+      return;
+    }
+
+    try {
+      const record = await storage.getWorkflowDefinition(key);
+
+      if (!record) {
+        setLibraryMessage(`Workflow ${key} is no longer saved.`);
+        await refreshLibrary();
+        return;
+      }
+
+      const linkedStateMachine = await storage.getStateMachineDefinition(record.stateMachineKey);
+
+      if (!linkedStateMachine) {
+        setLibraryMessage(`Linked state machine ${record.stateMachineKey} must be saved before this workflow can load.`);
+        return;
+      }
+
+      const reconciliation = reconcileWorkflowToStateMachine(record.definition, linkedStateMachine.definition);
+      const result = validateWorkflowDefinition(reconciliation.workflow, linkedStateMachine.definition);
+
+      if (!result.valid) {
+        setLibraryMessage(`Saved workflow is invalid: ${result.errors.map((error) => error.message).join(" ")}`);
+        return;
+      }
+
+      setDefinition(linkedStateMachine.definition);
+      setSelectedState(linkedStateMachine.definition.states[0] ?? "");
+      setWorkflow(removeEmbeddedStateMachine(reconciliation.workflow));
+      setSelectedBucketId(reconciliation.workflow.buckets[0]?.id ?? "");
+      setSelectedLifecycleHookId(reconciliation.workflow.hooks[0]?.id ?? null);
+      setActivePage("workflow");
+      setLibraryMessage(formatWorkflowSyncMessage(reconciliation.summary) ?? `Loaded workflow ${record.key}.`);
+    } catch (error) {
+      setLibraryMessage(error instanceof Error ? error.message : "Unable to load workflow from the Library.");
+    }
+  }
+
+  async function duplicateStateMachineVersionFromLibrary(key: string) {
+    if (!storage) {
+      setLibraryMessage("Local definition library is not available in this browser.");
+      return;
+    }
+
+    try {
+      const record = await storage.getStateMachineDefinition(key);
+
+      if (!record) {
+        setLibraryMessage(`State machine ${key} is no longer saved.`);
+        await refreshLibrary();
+        return;
+      }
+
+      const nextVersion = window.prompt("New state-machine version", record.definition.definitionVersion);
+
+      if (!nextVersion) {
+        setLibraryMessage("State-machine duplicate cancelled.");
+        return;
+      }
+
+      const nextDefinition = { ...record.definition, definitionVersion: nextVersion.trim() };
+      const result = validateStateMachineDefinition(nextDefinition);
+
+      if (!result.valid) {
+        setLibraryMessage(`New version is invalid: ${result.errors.map((error) => error.message).join(" ")}`);
+        return;
+      }
+
+      const nextKey = buildStateMachineDefinitionKey(nextDefinition);
+      const existing = await storage.getStateMachineDefinition(nextKey);
+
+      if (existing && !window.confirm(`Replace saved state machine ${nextKey}?`)) {
+        setLibraryMessage("State-machine duplicate cancelled.");
+        return;
+      }
+
+      const saved = await storage.saveStateMachineDefinition(nextDefinition);
+      await refreshLibrary(saved.key);
+      setLibraryMessage(`Duplicated state machine as ${saved.key}.`);
+    } catch (error) {
+      setLibraryMessage(error instanceof Error ? error.message : "Unable to duplicate state-machine version.");
+    }
+  }
+
+  async function duplicateWorkflowVersionFromLibrary(key: string) {
+    if (!storage) {
+      setLibraryMessage("Local definition library is not available in this browser.");
+      return;
+    }
+
+    try {
+      const record = await storage.getWorkflowDefinition(key);
+
+      if (!record) {
+        setLibraryMessage(`Workflow ${key} is no longer saved.`);
+        await refreshLibrary();
+        return;
+      }
+
+      const nextVersion = window.prompt("New workflow version", record.definition.workflowVersion);
+
+      if (!nextVersion) {
+        setLibraryMessage("Workflow duplicate cancelled.");
+        return;
+      }
+
+      const nextWorkflow = { ...record.definition, workflowVersion: nextVersion.trim() };
+      const linkedStateMachine = await storage.getStateMachineDefinition(record.stateMachineKey);
+      const result = validateWorkflowDefinition(nextWorkflow, linkedStateMachine?.definition);
+
+      if (!result.valid) {
+        setLibraryMessage(`New workflow version is invalid: ${result.errors.map((error) => error.message).join(" ")}`);
+        return;
+      }
+
+      const nextKey = buildWorkflowDefinitionKey(nextWorkflow);
+      const existing = await storage.getWorkflowDefinition(nextKey);
+
+      if (existing && !window.confirm(`Replace saved workflow ${nextKey}?`)) {
+        setLibraryMessage("Workflow duplicate cancelled.");
+        return;
+      }
+
+      const saved = await storage.saveWorkflowDefinition(nextWorkflow);
+      await refreshLibrary(saved.stateMachineKey);
+      setLibraryMessage(`Duplicated workflow as ${saved.key}.`);
+    } catch (error) {
+      setLibraryMessage(error instanceof Error ? error.message : "Unable to duplicate workflow version.");
+    }
+  }
+
+  async function deleteStateMachineFromLibrary(key: string) {
+    if (!storage) {
+      setLibraryMessage("Local definition library is not available in this browser.");
+      return;
+    }
+
+    try {
+      const linkedWorkflows = await storage.listWorkflowDefinitionsForStateMachine(key);
+
+      if (linkedWorkflows.length > 0) {
+        setLibraryMessage(`Delete linked workflows before deleting ${key}.`);
+        return;
+      }
+
+      if (!window.confirm(`Delete saved state machine ${key}?`)) {
+        setLibraryMessage("State-machine delete cancelled.");
+        return;
+      }
+
+      await storage.deleteStateMachineDefinition(key);
+      await refreshLibrary(null);
+      setLibraryMessage(`Deleted state machine ${key}.`);
+    } catch (error) {
+      setLibraryMessage(error instanceof Error ? error.message : "Unable to delete state machine from the Library.");
+    }
+  }
+
+  async function deleteWorkflowFromLibrary(key: string) {
+    if (!storage) {
+      setLibraryMessage("Local definition library is not available in this browser.");
+      return;
+    }
+
+    try {
+      const record = await storage.getWorkflowDefinition(key);
+
+      if (!record) {
+        setLibraryMessage(`Workflow ${key} is no longer saved.`);
+        await refreshLibrary();
+        return;
+      }
+
+      if (!window.confirm(`Delete saved workflow ${key}?`)) {
+        setLibraryMessage("Workflow delete cancelled.");
+        return;
+      }
+
+      await storage.deleteWorkflowDefinition(key);
+      await refreshLibrary(record.stateMachineKey);
+      setLibraryMessage(`Deleted workflow ${key}.`);
+    } catch (error) {
+      setLibraryMessage(error instanceof Error ? error.message : "Unable to delete workflow from the Library.");
+    }
+  }
+
   function updateLogoUrl(logoUrl: string) {
     updateSettings({ ...settings, logoUrl });
   }
@@ -990,6 +1423,13 @@ export function App() {
           </button>
           <button
             type="button"
+            className={activePage === "library" ? "secondary active" : "secondary"}
+            onClick={() => setActivePage("library")}
+          >
+            Library
+          </button>
+          <button
+            type="button"
             className={activePage === "settings" ? "secondary active" : "secondary"}
             onClick={() => setActivePage("settings")}
           >
@@ -1016,6 +1456,9 @@ export function App() {
               <button type="button" className="secondary" onClick={() => stateMachineFileInputRef.current?.click()}>
                 Import State Machine
               </button>
+              <button type="button" className="secondary" onClick={saveCurrentStateMachineToLibrary} disabled={!validation.valid}>
+                Save State Machine
+              </button>
               <button type="button" onClick={exportStateMachineDefinition} disabled={!validation.valid}>
                 Export State Machine
               </button>
@@ -1028,6 +1471,9 @@ export function App() {
               </button>
               <button type="button" className="secondary danger" onClick={resetWorkflow}>
                 Reset Workflow
+              </button>
+              <button type="button" className="secondary" onClick={saveCurrentWorkflowToLibrary} disabled={!workflowValidation.valid}>
+                Save Workflow
               </button>
               <button type="button" onClick={() => exportWorkflowDefinition(false)} disabled={!workflowValidation.valid}>
                 Export Workflow
@@ -1042,6 +1488,28 @@ export function App() {
 
       {activePage === "settings" ? (
         <SettingsPage logoUrl={settings.logoUrl} onLogoUrlChange={updateLogoUrl} />
+      ) : null}
+
+      {activePage === "library" ? (
+        <LibraryPage
+          currentStateMachineKey={currentStateMachineKey}
+          currentWorkflowKey={currentWorkflowKey}
+          isReady={isLibraryReady}
+          message={libraryMessage}
+          stateMachineRecords={stateMachineRecords}
+          workflowRecords={workflowRecords}
+          selectedStateMachine={selectedLibraryStateMachine}
+          selectedWorkflows={selectedLibraryWorkflows}
+          onSelectStateMachine={setSelectedLibraryStateMachineKey}
+          onSaveStateMachine={saveCurrentStateMachineToLibrary}
+          onSaveWorkflow={saveCurrentWorkflowToLibrary}
+          onLoadStateMachine={loadStateMachineFromLibrary}
+          onLoadWorkflow={loadWorkflowFromLibrary}
+          onDuplicateStateMachine={duplicateStateMachineVersionFromLibrary}
+          onDuplicateWorkflow={duplicateWorkflowVersionFromLibrary}
+          onDeleteStateMachine={deleteStateMachineFromLibrary}
+          onDeleteWorkflow={deleteWorkflowFromLibrary}
+        />
       ) : null}
 
       {activePage === "state-machine" ? (
@@ -1461,6 +1929,183 @@ export function App() {
         </>
       ) : null}
     </main>
+  );
+}
+
+function LibraryPage({
+  currentStateMachineKey,
+  currentWorkflowKey,
+  isReady,
+  message,
+  stateMachineRecords,
+  workflowRecords,
+  selectedStateMachine,
+  selectedWorkflows,
+  onSelectStateMachine,
+  onSaveStateMachine,
+  onSaveWorkflow,
+  onLoadStateMachine,
+  onLoadWorkflow,
+  onDuplicateStateMachine,
+  onDuplicateWorkflow,
+  onDeleteStateMachine,
+  onDeleteWorkflow,
+}: {
+  currentStateMachineKey: string;
+  currentWorkflowKey: string;
+  isReady: boolean;
+  message: string | null;
+  stateMachineRecords: PersistedStateMachineDefinition[];
+  workflowRecords: PersistedWorkflowDefinition[];
+  selectedStateMachine: PersistedStateMachineDefinition | null;
+  selectedWorkflows: PersistedWorkflowDefinition[];
+  onSelectStateMachine: (key: string) => void;
+  onSaveStateMachine: () => void;
+  onSaveWorkflow: () => void;
+  onLoadStateMachine: (key: string) => void;
+  onLoadWorkflow: (key: string) => void;
+  onDuplicateStateMachine: (key: string) => void;
+  onDuplicateWorkflow: (key: string) => void;
+  onDeleteStateMachine: (key: string) => void;
+  onDeleteWorkflow: (key: string) => void;
+}) {
+  const selectedWorkflowCount = selectedWorkflows.length;
+
+  return (
+    <section className="library-region" aria-label="Definition library">
+      <section className="panel library-summary-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Library</h2>
+            <p className="panel-subtitle">
+              {stateMachineRecords.length} state machine{stateMachineRecords.length === 1 ? "" : "s"} ·{" "}
+              {workflowRecords.length} workflow{workflowRecords.length === 1 ? "" : "s"}
+            </p>
+          </div>
+          <div className="library-actions">
+            <button type="button" className="secondary" onClick={onSaveStateMachine}>
+              Save State Machine
+            </button>
+            <button type="button" className="secondary" onClick={onSaveWorkflow}>
+              Save Workflow
+            </button>
+          </div>
+        </div>
+        <dl className="library-current-keys">
+          <div>
+            <dt>Current state machine</dt>
+            <dd>{currentStateMachineKey}</dd>
+          </div>
+          <div>
+            <dt>Current workflow</dt>
+            <dd>{currentWorkflowKey}</dd>
+          </div>
+        </dl>
+        {message ? <p className="export-message">{message}</p> : null}
+        {!isReady ? <p className="valid-message">Opening local definition library.</p> : null}
+      </section>
+
+      <section className="workspace-grid library-grid">
+        <section className="panel column-panel">
+          <div className="panel-heading">
+            <h2>State Machines</h2>
+            <span className="schema-version">{stateMachineRecords.length}</span>
+          </div>
+          <div className="column-scroll">
+            {stateMachineRecords.length === 0 ? (
+              <div className="empty-column">No saved state machines.</div>
+            ) : (
+              <div className="library-record-list" role="list" aria-label="Saved state machines">
+                {stateMachineRecords.map((record) => {
+                  const workflowCount = workflowRecords.filter((workflowRecord) => workflowRecord.stateMachineKey === record.key).length;
+                  const selected = selectedStateMachine?.key === record.key;
+
+                  return (
+                    <div
+                      key={record.key}
+                      className={selected ? "library-record-row selected" : "library-record-row"}
+                      role="listitem"
+                    >
+                      <button
+                        type="button"
+                        className="library-record-main"
+                        onClick={() => onSelectStateMachine(record.key)}
+                        aria-pressed={selected}
+                      >
+                        <span>{record.definition.id}</span>
+                        <span>{record.definition.definitionVersion}</span>
+                        <span>
+                          {workflowCount} workflow{workflowCount === 1 ? "" : "s"}
+                        </span>
+                      </button>
+                      <div className="library-row-actions">
+                        <button type="button" className="secondary compact" onClick={() => onLoadStateMachine(record.key)}>
+                          Load
+                        </button>
+                        <button type="button" className="secondary compact" onClick={() => onDuplicateStateMachine(record.key)}>
+                          Duplicate
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary compact danger"
+                          onClick={() => onDeleteStateMachine(record.key)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="panel column-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Workflows</h2>
+              <p className="panel-subtitle">{selectedStateMachine?.key ?? "No state machine selected"}</p>
+            </div>
+            <span className="schema-version">{selectedWorkflowCount}</span>
+          </div>
+          <div className="column-scroll">
+            {!selectedStateMachine ? (
+              <div className="empty-column">No state machine selected.</div>
+            ) : selectedWorkflows.length === 0 ? (
+              <div className="empty-column">No saved workflows.</div>
+            ) : (
+              <div className="library-record-list" role="list" aria-label="Saved workflows">
+                {selectedWorkflows.map((record) => (
+                  <div key={record.key} className="library-record-row" role="listitem">
+                    <div className="library-record-main static">
+                      <span>{record.definition.id}</span>
+                      <span>{record.definition.workflowVersion}</span>
+                      <span>
+                        {record.definition.actions.length} action{record.definition.actions.length === 1 ? "" : "s"} ·{" "}
+                        {record.definition.buckets.length} bucket{record.definition.buckets.length === 1 ? "" : "s"} ·{" "}
+                        {record.definition.hooks.length} hook{record.definition.hooks.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <div className="library-row-actions">
+                      <button type="button" className="secondary compact" onClick={() => onLoadWorkflow(record.key)}>
+                        Load
+                      </button>
+                      <button type="button" className="secondary compact" onClick={() => onDuplicateWorkflow(record.key)}>
+                        Duplicate
+                      </button>
+                      <button type="button" className="secondary compact danger" onClick={() => onDeleteWorkflow(record.key)}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+      </section>
+    </section>
   );
 }
 
@@ -3529,4 +4174,18 @@ function loadAppSettings(): AppSettings {
   } catch {
     return defaultSettings;
   }
+}
+
+function buildDraftSignature(
+  definition: EditableDefinition,
+  workflow: EditableWorkflowDefinition,
+  activePage?: string,
+  selectedWorkflowView?: string,
+) {
+  return JSON.stringify({
+    definition,
+    workflow,
+    activePage,
+    selectedWorkflowView,
+  });
 }

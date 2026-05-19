@@ -6,12 +6,12 @@ The state-machine layer is deliberately narrow. It owns valid states, allowed st
 
 ## Status
 
-- Version: `1.0.3`
+- Version: `1.0.4`
 - Runtime: TypeScript, React, Vite, Mermaid
-- Storage: local file import/export only; exports use the File System Access API when supported and browser download fallback otherwise
+- Storage: browser-local IndexedDB Library plus JSON import/export; exports use the File System Access API when supported and browser download fallback otherwise
 - App selection: Target App fields can be filled from a local folder picker when the browser supports directory selection
 - App settings: logo URL and light/dark theme are stored in browser local storage
-- Release state: private `1.0.3` project checkpoint, not published
+- Release state: private `1.0.4` project checkpoint, not published
 
 ## Development
 
@@ -162,6 +162,30 @@ Bundled workflow exports include `embeddedStateMachineDefinition` and use:
 (target-app)-(workflow-version)-workflow-definition-bundled.json
 ```
 
+## Browser Library Storage
+
+The editor keeps a browser-local IndexedDB Library for saved definitions and a recoverable current workspace draft. The saved Library is separate from import/export JSON: storage metadata is not included in normal exported files.
+
+Saved state-machine definitions are keyed by the exact definition identity:
+
+```text
+stateMachine:(state-machine-id)@(definition-version)
+```
+
+For example: `stateMachine:scan_job_state@0.1.0`.
+
+Saved workflow definitions are scoped under the exact state-machine version they reference:
+
+```text
+workflow:(state-machine-id)@(definition-version)/(workflow-id)@(workflow-version)
+```
+
+For example: `workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0`.
+
+The Library page can save the current state machine, save the current workflow, load saved records, duplicate records as new versions, and delete records. A workflow can only be saved after its linked state-machine version is saved. A state-machine version cannot be deleted while saved workflows still reference it.
+
+Imports load into the current workspace draft only. They do not create saved Library records until the user explicitly saves them.
+
 ## Target App Integration Model
 
 A target app is an app that ingests a state-machine definition and workflow definition exported from this editor, then uses those definitions to configure its own workflow engine for its own work items. Work items are intentionally documentation-only here: they might be photos, articles, orders, or any other target-app record, but this editor does not define work-item schemas, storage, ownership, authorization, or app data models.
@@ -179,10 +203,11 @@ Failure handling, retries, logging, authorization, idempotency, persistence, job
 - The app is titled `State Workflow Editor`, with the app version displayed beside the title.
 - The logo appears to the left of the app title and can be configured from Settings.
 - The light/dark mode icon appears beside the app title and version.
-- The app has State Machine, Workflow, and Settings pages.
+- The app has State Machine, Workflow, Library, and Settings pages.
 - The Target App control includes a folder picker that updates both state-machine and workflow app names.
 - The State Machine page uses three independently scrolling columns: states, selected-state transitions, and a read-only Mermaid preview.
 - The Workflow page has Actions, Buckets, and Lifecycle views. Actions maps named action-button labels onto legal state-machine transitions and lets users set trigger mode and user visibility. Buckets lets users edit bucket names directly, toggle bucket visibility, add states to the selected bucket from an all-state dropdown, toggle workflow-level state visibility, and remove states from the selected bucket. Lifecycle lets users add app-specific handler keys for before-transition, state-entry, while-in-state, and terminal-entry phases, with optional success and failure handler keys. All workflow views retain the action-labelled Mermaid preview; in Buckets view, the selected bucket's states use solid boundaries while all other states use dotted boundaries.
+- The Library page manages browser-local saved state-machine definitions and their exact-version linked workflow definitions.
 
 ## Core API
 
