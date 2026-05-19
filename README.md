@@ -2,16 +2,16 @@
 
 A TypeScript state-machine and workflow contract library with a browser-based definition editor.
 
-The state-machine layer is deliberately narrow. It owns valid states, allowed state-to-state transitions, terminal states, and definition validation. The workflow layer maps named app actions and workflow buckets onto those valid states and transitions, but guards, side effects, persistence, authorization, jobs, retries, idempotency, and runtime orchestration remain app/runtime concerns.
+The state-machine layer is deliberately narrow. It owns valid states, allowed state-to-state transitions, terminal states, and definition validation. The workflow layer maps named app actions onto valid state-machine transitions and may add optional bucket presentation metadata, but guards, side effects, persistence, authorization, jobs, retries, idempotency, and runtime orchestration remain app/runtime concerns.
 
 ## Status
 
-- Version: `1.0.0`
+- Version: `1.0.1`
 - Runtime: TypeScript, React, Vite, Mermaid
 - Storage: local file import/export only; exports use the File System Access API when supported and browser download fallback otherwise
 - App selection: Target App fields can be filled from a local folder picker when the browser supports directory selection
 - App settings: logo URL and light/dark theme are stored in browser local storage
-- Release state: private `1.0.0` project checkpoint, not published
+- Release state: private `1.0.1` project checkpoint, not published
 
 ## Development
 
@@ -69,7 +69,7 @@ Workflow definitions keep their own `id` and `workflowVersion` separate. The lin
 
 ```json
 {
-  "schemaVersion": "0.3.0",
+  "schemaVersion": "0.4.0",
   "appName": "Example App",
   "workflowVersion": "0.1.0",
   "id": "scan_job_workflow",
@@ -126,7 +126,7 @@ Workflow definitions keep their own `id` and `workflowVersion` separate. The lin
 }
 ```
 
-Workflow buckets, state visibility, action visibility, action trigger mode, and handler keys are exported contract metadata. Bucket IDs and handler keys use lowercase snake_case, labels are required, and every state in the linked state-machine definition must be assigned to exactly one bucket. Imports from older `0.1.0` and `0.2.0` workflow files are upgraded in memory with visible buckets, visible workflow states, and user-visible actions by default; new exports use workflow schema `0.3.0`.
+Workflow buckets, state visibility, action visibility, action trigger mode, and handler keys are exported contract metadata. Bucket IDs and handler keys use lowercase snake_case and labels are required. Buckets are optional UI presentation metadata: a workflow may have no buckets, empty buckets, or partial bucket assignments without invalidating actions. Exports always include the `buckets` array, even when it is empty. Imports from older `0.1.0`, `0.2.0`, and `0.3.0` workflow files are upgraded in memory with visible workflow states and user-visible actions by default; new exports use workflow schema `0.4.0`.
 
 Linked workflow exports use:
 
@@ -144,9 +144,9 @@ Bundled workflow exports include `embeddedStateMachineDefinition` and use:
 
 A target app is an app that ingests a state-machine definition and workflow definition exported from this editor, then uses those definitions to configure its own workflow engine for its own work items. Work items are intentionally documentation-only here: they might be photos, articles, orders, or any other target-app record, but this editor does not define work-item schemas, storage, ownership, authorization, or app data models.
 
-The exported workflow is a contract, not an executable workflow engine. Visible buckets and visible states describe the user-facing workflow surface that a target app may render. Hidden buckets and states remain valid contract metadata for app-internal processing, but they are not meant to appear as user controls.
+The exported workflow is a contract, not an executable workflow engine. Buckets and state visibility describe an optional user-facing workflow surface that a target app may render. Hidden or missing buckets and hidden states remain valid contract metadata choices and do not affect whether actions are valid.
 
-Actions describe how a valid transition is initiated. A `user` action must be visible and must start from a state that is visible and assigned to a visible bucket. An `automatic` action must be hidden from user controls. If an action has no `processing.handlerKey`, the target app may commit the transition immediately after accepting the trigger. If a handler key is present, the target app runs its own processing logic for that app-agnostic identifier and commits the state transition only after successful completion.
+Actions describe how a valid transition is initiated. Actions are grounded in the state-machine states and legal transitions, not in bucket placement. A `user` action must be visible. An `automatic` action must be hidden from user controls. If an action has no `processing.handlerKey`, the target app may commit the transition immediately after accepting the trigger. If a handler key is present, the target app runs its own processing logic for that app-agnostic identifier and commits the state transition only after successful completion.
 
 Failure handling, retries, logging, authorization, idempotency, persistence, job orchestration, and handler implementation stay entirely in the target app.
 

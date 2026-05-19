@@ -7,7 +7,7 @@ import {
   validateStateMachineDefinition,
 } from "./stateMachine";
 
-export const WORKFLOW_SCHEMA_VERSION = "0.3.0" as const;
+export const WORKFLOW_SCHEMA_VERSION = "0.4.0" as const;
 
 export type WorkflowSchemaVersion = typeof WORKFLOW_SCHEMA_VERSION;
 
@@ -75,7 +75,6 @@ export type WorkflowValidationCode =
   | "invalid_action_trigger"
   | "visible_automatic_action"
   | "hidden_user_action"
-  | "hidden_user_action_state"
   | "invalid_handler_key"
   | "duplicate_workflow_state"
   | "unknown_workflow_state"
@@ -83,9 +82,7 @@ export type WorkflowValidationCode =
   | "invalid_bucket_id"
   | "duplicate_bucket"
   | "missing_bucket_label"
-  | "unknown_bucket_state"
-  | "duplicate_bucket_state"
-  | "unmapped_bucket_state";
+  | "unknown_bucket_state";
 
 export type WorkflowValidationError = {
   code: WorkflowValidationCode;
@@ -244,7 +241,6 @@ export function validateWorkflowDefinition<State extends string>(
   }
 
   const stateVisibility = new Map<State, boolean>();
-  const visibleBucketsByState = new Map<State, boolean>();
 
   workflow.states.forEach((state, index) => {
     if (!machine?.states.has(state.id)) {
@@ -268,12 +264,6 @@ export function validateWorkflowDefinition<State extends string>(
       });
     }
   }
-
-  workflow.buckets.forEach((bucket) => {
-    bucket.states.forEach((state) => {
-      visibleBucketsByState.set(state, bucket.visible);
-    });
-  });
 
   workflow.actions.forEach((action, index) => {
     if (!isValidWorkflowId(action.id)) {
@@ -333,14 +323,6 @@ export function validateWorkflowDefinition<State extends string>(
       return;
     }
 
-    if (action.trigger === "user" && (!stateVisibility.get(action.from) || !visibleBucketsByState.get(action.from))) {
-      errors.push({
-        code: "hidden_user_action_state",
-        message: `User-triggered action "${action.id}" must start from a state in a visible state and bucket.`,
-        path: `actions.${index}.from`,
-      });
-    }
-
     if (isTerminalState(machine, action.from)) {
       errors.push({
         code: "terminal_state_has_action",
@@ -376,8 +358,6 @@ export function validateWorkflowDefinition<State extends string>(
     }
   });
 
-  const bucketStateAssignments = new Map<State, string[]>();
-
   workflow.buckets.forEach((bucket, bucketIndex) => {
     bucket.states.forEach((state, stateIndex) => {
       if (!machine?.states.has(state)) {
@@ -389,27 +369,8 @@ export function validateWorkflowDefinition<State extends string>(
         return;
       }
 
-      bucketStateAssignments.set(state, [...(bucketStateAssignments.get(state) ?? []), bucket.id]);
     });
   });
-
-  for (const state of machine.definition.states) {
-    const assignments = bucketStateAssignments.get(state) ?? [];
-
-    if (assignments.length === 0) {
-      errors.push({
-        code: "unmapped_bucket_state",
-        message: `State "${state}" must be assigned to one workflow bucket.`,
-        path: "buckets",
-      });
-    } else if (assignments.length > 1) {
-      errors.push({
-        code: "duplicate_bucket_state",
-        message: `State "${state}" is assigned to more than one workflow bucket.`,
-        path: "buckets",
-      });
-    }
-  }
 
   return {
     valid: errors.length === 0,

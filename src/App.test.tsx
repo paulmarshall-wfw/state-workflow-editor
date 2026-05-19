@@ -102,6 +102,12 @@ function getWorkflowBucketLabelValues() {
     .map((input) => (input as HTMLInputElement).value);
 }
 
+function queryWorkflowBucketLabelValues() {
+  return screen
+    .queryAllByRole("textbox", { name: /^Bucket \d+ label$/ })
+    .map((input) => (input as HTMLInputElement).value);
+}
+
 type TestUser = ReturnType<typeof userEvent.setup>;
 
 async function openWorkflowValidationIssues(user: TestUser) {
@@ -151,7 +157,7 @@ describe("App", () => {
 
     expect(screen.getByRole("heading", { name: "State Workflow Editor" })).toBeInTheDocument();
     expect(screen.queryByText("State Machine Core")).not.toBeInTheDocument();
-    expect(screen.getByText("v1.0.0")).toBeInTheDocument();
+    expect(screen.getByText("v1.0.1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Switch to dark mode" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "State Machine" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Workflow" })).toBeInTheDocument();
@@ -200,7 +206,7 @@ describe("App", () => {
       transitions: [{ from: "queued", to: "running" }],
     } as const;
     const workflow = {
-      schemaVersion: "0.3.0",
+      schemaVersion: "0.4.0",
       appName: "Example Project",
       workflowVersion: "0.1.0",
       id: "scan_job_workflow",
@@ -274,28 +280,21 @@ describe("App", () => {
     fireEvent.drop(runningRow, { dataTransfer });
 
     expect(getStateInputValues()).toEqual(["queued", "failed", "running", "completed", "cancelled"]);
-    expect(screen.getByRole("button", { name: "queued" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("listitem", { name: "queued state row" })).toHaveClass("selected");
     expect(screen.getByRole("checkbox", { name: "completed terminal" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "cancelled terminal" })).toBeChecked();
     expect(screen.getByLabelText("Transition 1 target")).toHaveValue("running");
   });
 
-  it("reorders states with keyboard move controls", async () => {
+  it("selects a state from the state ID field", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(screen.getByRole("button", { name: "Move queued up" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Move cancelled down" })).toBeDisabled();
+    await user.click(screen.getByRole("textbox", { name: "State 2 ID" }));
 
-    await user.click(screen.getByRole("button", { name: "Move running up" }));
-
-    expect(getStateInputValues()).toEqual(["running", "queued", "completed", "failed", "cancelled"]);
-    expect(screen.getByRole("button", { name: "queued" })).toHaveAttribute("aria-pressed", "true");
-
-    await user.click(screen.getByRole("button", { name: "Move queued down" }));
-
-    expect(getStateInputValues()).toEqual(["running", "completed", "queued", "failed", "cancelled"]);
-    expect(screen.getByRole("button", { name: "queued" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("listitem", { name: "running state row" })).toHaveClass("selected");
+    expect(screen.getByLabelText("Transition 2 target")).toHaveValue("completed");
+    expect(screen.queryByLabelText("Transition 1 target")).not.toBeInTheDocument();
   });
 
   it("shows validation errors and disables export for terminal outgoing transitions", async () => {
@@ -311,6 +310,18 @@ describe("App", () => {
 
   it("imports a valid JSON definition", async () => {
     const user = userEvent.setup();
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const showSaveFilePicker = vi.fn().mockResolvedValue({
+      createWritable: vi.fn().mockResolvedValue({ write, close }),
+    });
+
+    (
+      window as Window & {
+        showSaveFilePicker?: typeof showSaveFilePicker;
+      }
+    ).showSaveFilePicker = showSaveFilePicker;
+
     render(<App />);
 
     const json = JSON.stringify({
@@ -344,6 +355,20 @@ describe("App", () => {
 
     expect(screen.getByLabelText("Target App")).toHaveValue("Article Manager");
     expect(screen.getByLabelText("State Machine")).toHaveValue("article_state@1.2.3");
+    expect(screen.getByText(/Workflow synced to current state machine/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Export Workflow" }));
+
+    const workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0]));
+
+    expect(workflowExport.states.map((state: { id: string }) => state.id)).toEqual(["draft", "published"]);
+    expect(workflowExport.actions).toEqual([]);
+    expect(workflowExport.buckets).toEqual([
+      { id: "waiting", label: "Waiting", visible: true, states: [] },
+      { id: "active", label: "Active", visible: true, states: [] },
+      { id: "finished", label: "Finished", visible: true, states: [] },
+    ]);
   });
 
   it("shows the state-machine import drop zone only on the State Machine page", async () => {
@@ -392,7 +417,7 @@ describe("App", () => {
     expect(screen.getByLabelText("Target App")).toHaveValue("Article Manager");
     expect(screen.getByLabelText("State Machine Version")).toHaveValue("1.2.3");
     expect(getStateInputValues()).toEqual(["draft", "review", "published"]);
-    expect(screen.getByRole("button", { name: "draft" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("listitem", { name: "draft state row" })).toHaveClass("selected");
     expect(screen.getByText("Valid")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "State machine Mermaid preview" })).toBeInTheDocument();
 
@@ -436,7 +461,7 @@ describe("App", () => {
       expect(screen.getByLabelText("State Machine ID")).toHaveValue("review_state");
     });
     expect(screen.getByLabelText("Target App")).toHaveValue("Review Desk");
-    expect(screen.getByRole("button", { name: "new" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("listitem", { name: "new state row" })).toHaveClass("selected");
   });
 
   it("rejects invalid JSON from the drop zone without replacing the current definition", async () => {
@@ -559,8 +584,15 @@ describe("App", () => {
 
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Move failed up" }));
-    await user.click(screen.getByRole("button", { name: "Move failed up" }));
+    const dataTransfer = createDragDataTransfer();
+    const failedHandle = screen.getByRole("button", { name: "Drag failed" });
+    const runningRow = screen.getByRole("listitem", { name: "running state row" });
+
+    fireEvent.dragStart(failedHandle, { dataTransfer });
+    fireEvent.dragEnter(runningRow, { dataTransfer });
+    fireEvent.dragOver(runningRow, { dataTransfer });
+    fireEvent.drop(runningRow, { dataTransfer });
+
     await user.click(screen.getByRole("button", { name: "Export State Machine" }));
 
     await waitFor(() => {
@@ -831,30 +863,6 @@ describe("App", () => {
     expect(screen.getByLabelText("Action 3 target")).toHaveValue("completed");
   });
 
-  it("reorders visible workflow actions with keyboard controls", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    await user.click(screen.getByRole("button", { name: "Workflow" }));
-    await screen.findByTestId("mock-mermaid-svg");
-    await user.selectOptions(screen.getByLabelText("Selected State"), "running");
-    await waitFor(() => {
-      expect(screen.queryByText("Rendering preview...")).not.toBeInTheDocument();
-    });
-
-    expect(screen.getByRole("button", { name: "Move Complete action up" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Move Cancel action down" })).toBeDisabled();
-
-    await user.click(screen.getByRole("button", { name: "Move Fail action up" }));
-
-    expect(getWorkflowActionLabelValues()).toEqual(["Fail", "Complete", "Cancel"]);
-
-    await user.click(screen.getByRole("button", { name: "Move Complete action down" }));
-
-    expect(getWorkflowActionLabelValues()).toEqual(["Fail", "Cancel", "Complete"]);
-    expect(screen.getByLabelText("Selected State")).toHaveValue("running");
-  });
-
   it("switches to workflow buckets and maps states while retaining the workflow preview", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -891,8 +899,8 @@ describe("App", () => {
     await user.click(within(queuedRow).getByRole("button", { name: "Remove" }));
 
     expect(within(mappingPanel).queryByText("queued")).not.toBeInTheDocument();
-    expect(within(await openWorkflowValidationIssues(user)).getByText('State "queued" must be assigned to one workflow bucket.')).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "View Issues" })).not.toBeInTheDocument();
   });
 
   it("reorders workflow buckets by dragging while preserving the selected bucket mapping", async () => {
@@ -915,24 +923,6 @@ describe("App", () => {
     expect(getWorkflowBucketLabelValues()).toEqual(["Waiting", "Finished", "Active"]);
     expect(within(mappingPanel).getByText("queued")).toBeInTheDocument();
     expect(within(mappingPanel).queryByText("completed")).not.toBeInTheDocument();
-  });
-
-  it("reorders workflow buckets with keyboard controls", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    await user.click(screen.getByRole("button", { name: "Workflow" }));
-    await user.click(screen.getByRole("button", { name: "Buckets" }));
-
-    const mappingPanel = screen.getByRole("heading", { name: "State Mapping" }).closest("section") as HTMLElement;
-
-    expect(screen.getByRole("button", { name: "Move Waiting bucket up" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Move Finished bucket down" })).toBeDisabled();
-
-    await user.click(screen.getByRole("button", { name: "Move Active bucket up" }));
-
-    expect(getWorkflowBucketLabelValues()).toEqual(["Active", "Waiting", "Finished"]);
-    expect(within(mappingPanel).getByText("queued")).toBeInTheDocument();
   });
 
   it("disables workflow export when workflow actions are invalid", async () => {
@@ -987,7 +977,7 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Export Workflow" })).toBeEnabled();
   });
 
-  it("validates user actions against workflow bucket and state visibility", async () => {
+  it("keeps workflow actions valid when workflow buckets and state metadata are hidden", async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -996,23 +986,73 @@ describe("App", () => {
 
     await user.click(screen.getByLabelText("Bucket 1 visible"));
 
-    expect(
-      within(await openWorkflowValidationIssues(user)).getByText(
-        'User-triggered action "start" must start from a state in a visible state and bucket.',
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Close workflow validation issues" }));
+    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "View Issues" })).not.toBeInTheDocument();
 
     await user.click(screen.getByLabelText("Bucket 1 visible"));
     await user.click(screen.getByLabelText("queued visible"));
 
-    expect(
-      within(await openWorkflowValidationIssues(user)).getByText(
-        'User-triggered action "start" must start from a state in a visible state and bucket.',
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "View Issues" })).not.toBeInTheDocument();
+  });
+
+  it("resets workflow actions and bucket structure from the current state machine", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const showSaveFilePicker = vi.fn().mockResolvedValue({
+      createWritable: vi.fn().mockResolvedValue({ write, close }),
+    });
+
+    (
+      window as Window & {
+        showSaveFilePicker?: typeof showSaveFilePicker;
+      }
+    ).showSaveFilePicker = showSaveFilePicker;
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Reset Workflow" }));
+
+    expect(confirm).toHaveBeenCalledWith(
+      "Reset workflow actions and bucket structure? This removes workflow actions and buckets, but keeps the state machine definition.",
+    );
+    expect(screen.getByText("Workflow reset from current state machine.")).toBeInTheDocument();
+    expect(screen.getByText("No workflow actions for queued.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Buckets" }));
+
+    expect(getWorkflowBucketLabelValues()).toEqual(["Workflow"]);
+    const mappingPanel = screen.getByRole("heading", { name: "State Mapping" }).closest("section") as HTMLElement;
+
+    for (const state of ["queued", "running", "completed", "failed", "cancelled"]) {
+      expect(within(mappingPanel).getByText(state)).toBeInTheDocument();
+    }
+
+    await user.click(screen.getByRole("button", { name: "Export Workflow" }));
+
+    const workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0]));
+
+    expect(workflowExport.id).toBe("scan_job_workflow");
+    expect(workflowExport.workflowVersion).toBe("0.1.0");
+    expect(workflowExport.actions).toEqual([]);
+    expect(workflowExport.states.map((state: { id: string }) => state.id)).toEqual([
+      "queued",
+      "running",
+      "completed",
+      "failed",
+      "cancelled",
+    ]);
+    expect(workflowExport.buckets).toEqual([
+      {
+        id: "workflow",
+        label: "Workflow",
+        visible: true,
+        states: ["queued", "running", "completed", "failed", "cancelled"],
+      },
+    ]);
   });
 
   it("exports linked and bundled workflow definitions", async () => {
@@ -1032,10 +1072,25 @@ describe("App", () => {
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Workflow" }));
-    await user.click(screen.getByRole("button", { name: "Move Cancel action up" }));
+    const actionDataTransfer = createDragDataTransfer();
+    const cancelActionHandle = screen.getByRole("button", { name: "Drag Cancel action" });
+    const startActionRow = screen.getByRole("listitem", { name: "Start action row" });
+
+    fireEvent.dragStart(cancelActionHandle, { dataTransfer: actionDataTransfer });
+    fireEvent.dragEnter(startActionRow, { dataTransfer: actionDataTransfer });
+    fireEvent.dragOver(startActionRow, { dataTransfer: actionDataTransfer });
+    fireEvent.drop(startActionRow, { dataTransfer: actionDataTransfer });
+
     await user.click(screen.getByRole("button", { name: "Buckets" }));
-    await user.click(screen.getByRole("button", { name: "Move Finished bucket up" }));
-    await user.click(screen.getByRole("button", { name: "Move Finished bucket up" }));
+    const bucketDataTransfer = createDragDataTransfer();
+    const finishedBucketHandle = screen.getByRole("button", { name: "Drag Finished bucket" });
+    const waitingBucketRow = screen.getByRole("listitem", { name: "Waiting bucket row" });
+
+    fireEvent.dragStart(finishedBucketHandle, { dataTransfer: bucketDataTransfer });
+    fireEvent.dragEnter(waitingBucketRow, { dataTransfer: bucketDataTransfer });
+    fireEvent.dragOver(waitingBucketRow, { dataTransfer: bucketDataTransfer });
+    fireEvent.drop(waitingBucketRow, { dataTransfer: bucketDataTransfer });
+
     await user.click(screen.getByRole("button", { name: "Export Workflow" }));
     await user.click(screen.getByRole("button", { name: "Export Bundled Workflow" }));
 
@@ -1056,7 +1111,7 @@ describe("App", () => {
     const linkedExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
     const bundledExport = JSON.parse(await readBlobText(write.mock.calls[1][0] as Blob));
 
-    expect(linkedExport.schemaVersion).toBe("0.3.0");
+    expect(linkedExport.schemaVersion).toBe("0.4.0");
     expect(linkedExport.states).toEqual([
       { id: "queued", visible: true },
       { id: "running", visible: true },
@@ -1080,6 +1135,63 @@ describe("App", () => {
     ]);
     expect(bundledExport.actions).toEqual(linkedExport.actions);
     expect(bundledExport.buckets).toEqual(linkedExport.buckets);
+    expect(bundledExport.embeddedStateMachineDefinition.id).toBe("scan_job_state");
+  });
+
+  it("exports an empty bucket overlay after buckets are removed without changing actions", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const showSaveFilePicker = vi.fn().mockResolvedValue({
+      createWritable: vi.fn().mockResolvedValue({ write, close }),
+    });
+
+    (
+      window as Window & {
+        showSaveFilePicker?: typeof showSaveFilePicker;
+      }
+    ).showSaveFilePicker = showSaveFilePicker;
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Buckets" }));
+
+    for (const bucket of ["Waiting", "Active", "Finished"]) {
+      const row = screen.getByRole("listitem", { name: `${bucket} bucket row` });
+
+      await user.click(within(row).getByRole("button", { name: "Remove" }));
+    }
+
+    expect(confirm).toHaveBeenCalledTimes(3);
+    expect(confirm).toHaveBeenCalledWith(
+      "Remove this bucket? Its state assignments will be removed, but workflow actions and the state machine will not change.",
+    );
+    expect(queryWorkflowBucketLabelValues()).toEqual([]);
+    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+
+    expect(getWorkflowActionLabelValues()).toEqual(["Start", "Cancel"]);
+
+    await user.click(screen.getByRole("button", { name: "Export Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Export Bundled Workflow" }));
+
+    const linkedExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
+    const bundledExport = JSON.parse(await readBlobText(write.mock.calls[1][0] as Blob));
+
+    expect(linkedExport.buckets).toEqual([]);
+    expect(bundledExport.buckets).toEqual([]);
+    expect(linkedExport.actions.map((action: { id: string }) => action.id)).toEqual([
+      "start",
+      "complete",
+      "fail",
+      "retry",
+      "cancel_queued",
+      "cancel_running",
+    ]);
+    expect(bundledExport.actions).toEqual(linkedExport.actions);
     expect(bundledExport.embeddedStateMachineDefinition.id).toBe("scan_job_state");
   });
 
@@ -1114,10 +1226,43 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Export Workflow" })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Buckets" }));
-    expect(screen.getByRole("textbox", { name: "Bucket 1 label" })).toHaveValue("Workflow");
-    expect(screen.getByLabelText("Bucket 1 visible")).toBeChecked();
-    const mappingPanel = screen.getByRole("heading", { name: "State Mapping" }).closest("section") as HTMLElement;
-    expect(within(mappingPanel).getByText("queued")).toBeInTheDocument();
+    expect(queryWorkflowBucketLabelValues()).toEqual([]);
+    expect(screen.getByText("No bucket selected")).toBeInTheDocument();
+    expect(screen.getByText("Add a workflow bucket to map states.")).toBeInTheDocument();
+  });
+
+  it("imports linked workflow definitions with explicit empty bucket overlays", async () => {
+    render(<App />);
+
+    const json = JSON.stringify({
+      schemaVersion: "0.4.0",
+      appName: "Article Manager",
+      workflowVersion: "1.0.0",
+      id: "article_workflow",
+      stateMachine: { id: "scan_job_state", definitionVersion: "0.1.0" },
+      states: ["queued", "running", "completed", "failed", "cancelled"],
+      actions: [{ id: "start", label: "Start", from: "queued", to: "running", trigger: "user", visible: true }],
+      buckets: [],
+    });
+    const file = new File([json], "workflow-empty-buckets.json", { type: "application/json" });
+
+    Object.defineProperty(file, "text", {
+      value: async () => json,
+    });
+
+    fireEvent.change(screen.getByLabelText("Import workflow JSON definition"), {
+      target: { files: [file] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Workflow" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workflow ID")).toHaveValue("article_workflow");
+    });
+    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Buckets" }));
+    expect(queryWorkflowBucketLabelValues()).toEqual([]);
+    expect(screen.getByText("Add a workflow bucket to map states.")).toBeInTheDocument();
   });
 
   it("imports linked workflow definitions from the workflow drop zone", async () => {
@@ -1258,7 +1403,7 @@ describe("App", () => {
       expect(screen.getByLabelText("State Machine")).toHaveValue("article_state@1.2.3");
     });
     expect(screen.getByLabelText("Target App")).toHaveValue("Article Manager");
-    expect(screen.getByText("Imported state-machine definition.")).toBeInTheDocument();
+    expect(screen.getByText(/Workflow synced to current state machine/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "State Machine" }));
 

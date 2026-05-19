@@ -3,95 +3,94 @@
 ## 1. Metadata
 
 - project name: State Workflow Editor
-- handoff type: project checkpoint
-- created timestamp in UTC: 2026-05-16T21:19:05Z
+- handoff type: release checkpoint
+- created timestamp in UTC: 2026-05-19T03:14:36Z
 - prepared by: Codex
 - repository, workspace, or folder: `/Users/paulmarshall/Software Development/state-workflow-engine`
 - branch or working context: `main`
-- session scope: promote the editor to app version `1.0.0`, checkpoint workflow validation/import UX, refresh documentation, and commit the project state
+- session scope: workflow reconciliation, optional bucket overlay semantics, state-list UI cleanup, version `1.0.1`, AppLauncher manifest refresh, and Git checkpoint
 
 ### Checkpoint Status
 
-- Git HEAD: current HEAD after the `1.0.0` checkpoint commit
+- Git HEAD: current HEAD
 - Working tree: clean after checkpoint commit
-- Dirty files intentionally in scope before commit:
-  - `.env.example`
-  - `README.md`
-  - `handoff.md`
-  - `package-lock.json`
-  - `package.json`
-  - `src/App.test.tsx`
-  - `src/App.tsx`
-  - `src/styles.css`
-  - `vite.config.ts`
+- Dirty files intentionally in scope: None
 - Dirty files intentionally out of scope: None
 - Untracked files intentionally in scope: None
 - Untracked files intentionally out of scope: None
 - Canonical files described:
   - `AGENTS.md`
   - `README.md`
+  - `docs/plans/state-workflow-editor.md`
+  - `docs/plans/CleanSlateValidate.md`
   - `package.json`
   - `package-lock.json`
-  - `src/lib/stateMachine.ts`
-  - `src/lib/workflow.ts`
+  - `dist/applauncher-manifests/state-workflow-engine/1.0.1/manifest.json`
   - `src/App.tsx`
+  - `src/App.test.tsx`
+  - `src/lib/workflow.ts`
+  - `src/lib/workflow.test.ts`
   - `src/styles.css`
-  - `vite.config.ts`
-  - `docs/plans/state-workflow-editor.md`
+  - `rescued-workflows/`
 - Last verification:
   - command: `npm run verify`
   - result: passed
-  - timestamp UTC: 2026-05-16T21:20:34Z
+  - timestamp UTC: 2026-05-19T03:13:37Z
+- AppLauncher validation:
+  - repo manifest: `node /Users/paulmarshall/Software\ Development/All\ Skills/applauncher-manifest/scripts/validate_manifest.mjs --manifest dist/applauncher-manifests/state-workflow-engine/1.0.1/manifest.json`
+  - installed manifest: `node /Users/paulmarshall/Software\ Development/All\ Skills/applauncher-manifest/scripts/validate_manifest.mjs --manifest "$HOME/Library/Application Support/AppLauncher/manifest-install/state-workflow-engine/1.0.1/manifest.json"`
+  - result: both passed with `Errors: 0`, `Warnings: 0`; repo and installed copies matched
 - Handoff freshness: fresh-to-HEAD
-- Safe-to-continue basis: the handoff is committed with the `1.0.0` checkpoint it describes; `npm run verify` passed after the version bump and UI/import changes
-- Next checkpoint action: continue from clean `main`
+- Safe-to-continue basis: this handoff is committed with the checkpoint it describes, the package version is `1.0.1`, `npm run verify` passed, and the AppLauncher manifest validated in both repo and machine install-source locations
+- Next checkpoint action: continue feature work from clean `main`
 
 ## 2. Executive Summary
 
-The project is a TypeScript/Vite/React repo containing a reusable state-machine core, a workflow contract layer, and a browser-based editor. The state-machine core owns valid states, allowed transitions, terminal states, definition metadata, and validation. The workflow layer maps named app actions and workflow buckets onto those valid states and transitions while keeping guards, authorization, side effects, persistence, jobs, retries, idempotency, logging, and runtime orchestration out of scope.
+The project is a TypeScript/Vite/React repo containing a reusable state-machine core, a workflow contract layer, and a browser-based editor. The state-machine core remains limited to states, allowed transitions, terminal states, definition metadata, and validation. The workflow layer maps named app actions onto legal state-machine transitions and can add optional presentation metadata.
 
-The current checkpoint is app version `1.0.0`. It keeps state-machine definition versioning separate from the app/package version, preserves state-machine schema `0.2.0`, and uses workflow schema `0.3.0`.
+This checkpoint bumps the app/package version to `1.0.1`, keeps state-machine schema `0.2.0`, and keeps workflow schema `0.4.0`.
 
 Completed in this checkpoint:
 
-- Workflow Validation issues now open in a closeable pop-up dialog from a compact `View Issues` action.
-- Importing a state-machine JSON file syncs the Target App into both the State Machine and Workflow pages.
-- The Workflow page has its own JSON drop zone for linked workflow, bundled workflow, and state-machine definition files.
-- Bundled workflow imports still load their embedded state-machine definition.
-- Vite dev-server host and port are configurable through `VITE_HOST` and `VITE_PORT`, defaulting to `127.0.0.1:5174` with strict port binding.
-- App/package version is bumped to `1.0.0` in `package.json` and `package-lock.json`.
+- Workflow reconciliation syncs workflow state metadata and actions to the current state machine when the state machine changes or a workflow is imported.
+- Stale workflow actions are removed when their states or transitions no longer exist.
+- Workflow buckets are optional presentation metadata; empty, missing, partial, hidden, and duplicate bucket assignments do not affect action validity.
+- Reset Workflow clears workflow actions and rebuilds one visible default bucket without changing the state-machine definition.
+- State Machine rows no longer show the redundant derived state label button; the state ID input is the primary state name and selects the row on focus/click.
+- Up/Down reorder controls were removed from state rows, workflow action rows, and bucket rows; drag-grip reorder controls remain.
+- AppLauncher `localWebApp` manifest was regenerated for `1.0.1` and installed to the machine-level manifest-install tree.
+- Rescue workflow JSON files were committed under `rescued-workflows/` for traceability.
 
-Broader project context is not currently split into a `project-dossier.md`; this handoff and the existing README/plans are sufficient hot context.
+Broader project context remains in the README and plan docs; no separate `project-dossier.md` is needed right now.
 
 ## 3. Current Objective
 
-Immediate goal: preserve the current editor as a verified `1.0.0` project checkpoint.
+Immediate goal: resume from a clean, verified `1.0.1` checkpoint.
 
-Intended finished state: a clean Git checkpoint where users can author state-machine definitions, author workflow definitions, use compact validation issue review, import state-machine or workflow JSON from the appropriate page, and run the app locally with documented defaults.
+Intended finished state: the editor can author and export state-machine and workflow contracts with optional bucket overlays, validated workflow actions, state-machine/workflow import flows, Reset Workflow, and AppLauncher local launch support.
 
-Definition of done: `npm run verify` passes and the checkpoint is committed.
+Definition of done for this workstream: `npm run verify` passes, AppLauncher manifests validate, and all intended files are committed.
 
 ## 4. Current State
 
 ### Working
 
-- Core state-machine validation and runtime helpers are implemented in `src/lib/stateMachine.ts`.
+- Core state-machine validation and runtime helpers remain implemented in `src/lib/stateMachine.ts`.
 - Workflow validation and helper APIs are implemented in `src/lib/workflow.ts`.
+- Workflow schema constant is `0.4.0`.
+- Workflow validation enforces metadata, state-machine reference, action IDs/labels/triggers/visibility, legal transitions, terminal-state action restrictions, workflow state metadata, bucket IDs/labels, and unknown bucket states.
+- Workflow validation no longer requires every state to be assigned to a bucket.
+- Workflow validation no longer invalidates user actions because the source state is hidden, unbucketed, or in a hidden bucket.
 - The app has State Machine, Workflow, and Settings pages.
-- State Machine page supports target app selection, folder-based slug project picking, state machine ID/version, states, terminal toggles, selected-state transitions, continuous validation, JSON import/export, and Mermaid preview.
-- Workflow page supports workflow metadata, linked state-machine reference display, action editing, bucket editing, state mapping, workflow validation, linked export, bundled export, linked import, bundled import, and action-labelled Mermaid preview.
-- Workflow page JSON drop zone accepts linked workflow definitions, bundled workflow definitions with `embeddedStateMachineDefinition`, and plain state-machine definitions.
-- State-machine JSON import updates both the state-machine `appName` and workflow `appName`.
-- Workflow validation details are hidden from the page layout until the user opens the issues dialog; the dialog closes via Close, backdrop click, or Escape.
+- Workflow page supports metadata, linked state-machine reference display, action editing, bucket editing, state mapping, validation, linked export, bundled export, linked import, bundled import, state-machine import through the workflow drop zone, Reset Workflow, and action-labelled Mermaid preview.
 - Export uses `window.showSaveFilePicker` when available and browser download fallback otherwise.
-- App settings store configurable logo URL and light/dark theme in browser local storage.
-- App version displayed beside the title is sourced from `package.json`.
-- CI workflow is present and runs `npm ci` plus `npm run verify`.
+- AppLauncher can launch the app as a `localWebApp` on `127.0.0.1:5174` using an explicit PATH and `npm run dev`.
 
 ### Partially Working
 
 - Mermaid graphs are preview-only by design.
 - Settings currently covers logo URL and theme persistence only.
+- Browser visual regression is manual; automated coverage is through Vitest/jsdom.
 
 ### Not Working Yet
 
@@ -101,8 +100,8 @@ Definition of done: `npm run verify` passes and the checkpoint is committed.
 
 ### Not Yet Verified
 
-- Browser visual regression is not automated.
-- AppLauncher manifest/install state was not refreshed for version `1.0.0` in this checkpoint.
+- No live browser smoke test was run after the `1.0.1` checkpoint.
+- AppLauncher manifest machine readiness was not a native-app readiness check because this is a `localWebApp`; schema and semantic validation passed.
 
 ## 5. Active Constraints
 
@@ -111,9 +110,13 @@ Definition of done: `npm run verify` passes and the checkpoint is committed.
 - Treat `schemaVersion` as file-format version.
 - Treat `definitionVersion` as the user-controlled state definition version, separate from the app/package version.
 - Treat `workflowVersion` as the user-controlled workflow definition version, separate from the app/package version.
-- Use numbered versions only.
-- Treat `package.json` as the app/package version source of truth.
-- Run `npm run verify` before committing changes.
+- Treat buckets as optional workflow presentation metadata only.
+- Actions are valid only when backed by current legal state-machine transitions and valid action metadata.
+- Missing, empty, hidden, partial, or duplicate bucket assignments must not affect action validity.
+- Exported workflow JSON must include a `buckets` array, even when empty.
+- Use numbered versions only; `package.json` is the app/package version source of truth.
+- Run `npm run verify` before committing code changes.
+- Validate AppLauncher manifests before committing manifest work.
 
 ## 6. Commands and Verification
 
@@ -126,43 +129,43 @@ npm run build
 npm run verify
 ```
 
-Dev server defaults:
+Dev server default:
 
 ```sh
 npm run dev
 # http://127.0.0.1:5174/
 ```
 
-Optional dev-server overrides:
-
-```sh
-VITE_HOST=127.0.0.1 VITE_PORT=5176 npm run dev
-```
-
-Latest verified command:
+Latest verification:
 
 ```sh
 npm run verify
 ```
 
-Result: passed for `state-workflow-engine@1.0.0` at 2026-05-16T21:20:34Z. It ran TypeScript checking, 74 Vitest tests, and a Vite production build. The build still reports Mermaid-related chunk-size warnings; those are non-blocking and pre-existing for the current dependency shape.
+Result: passed for `state-workflow-engine@1.0.1` at 2026-05-19T03:13:37Z. It ran TypeScript checking, 75 Vitest tests, and a Vite production build. The existing Mermaid/jsdom `act(...)` warning still appears in one App test and does not fail verification. Vite still reports Mermaid-related chunk-size warnings; those are non-blocking for this checkpoint.
+
+AppLauncher manifest paths:
+
+- Repo artifact: `dist/applauncher-manifests/state-workflow-engine/1.0.1/manifest.json`
+- Machine install-source: `/Users/paulmarshall/Library/Application Support/AppLauncher/manifest-install/state-workflow-engine/1.0.1/manifest.json`
 
 ## 7. Files to Open First
 
 - `AGENTS.md`: repo-local standards and state/workflow boundary constraints.
-- `README.md`: current run, verify, structure, configuration, definition format, editor layout, and versioning notes.
-- `src/lib/stateMachine.ts`: reusable state-machine core and definition validation.
-- `src/lib/workflow.ts`: workflow contract validation and helper APIs.
-- `src/App.tsx`: editor UI, settings page, state-machine and workflow import/export behavior, validation dialog, and save-picker fallback.
-- `src/styles.css`: editor layout, dialog styling, drop-zone styling, and responsive behavior.
-- `vite.config.ts`: local dev-server host/port defaults.
-- `docs/plans/state-workflow-editor.md`: PRD and implementation plan for the expanded editor.
+- `README.md`: current version, definition formats, schema versions, optional bucket overlay semantics, run commands, and editor layout.
+- `src/lib/workflow.ts`: workflow schema `0.4.0`, validation rules, import/export contract assumptions, and helper APIs.
+- `src/App.tsx`: editor UI, reconciliation, Reset Workflow, import/export normalization, validation dialog, row selection, drag reorder, and save-picker fallback.
+- `src/App.test.tsx`: component coverage for reconciliation, reset, linked/bundled export, empty bucket imports, drag reorder, and state-row UI behavior.
+- `src/lib/workflow.test.ts`: core workflow validation tests for optional bucket overlay behavior.
+- `docs/plans/state-workflow-editor.md`: PRD/plan updated for optional buckets and workflow schema `0.4.0`.
+- `dist/applauncher-manifests/state-workflow-engine/1.0.1/manifest.json`: validated AppLauncher repo artifact.
 
 ## 8. Next Actions
 
 Next:
 
-- Continue feature work from the clean `1.0.0` checkpoint.
+- Continue normal feature work from clean `main`.
+- If UI changes continue, consider adding a browser smoke check for the State Machine and Workflow pages.
 
 Blocked:
 
@@ -170,10 +173,10 @@ Blocked:
 
 Later:
 
-- Refresh AppLauncher manifest/install artifacts if `1.0.0` should be launchable from AppLauncher.
-- Add browser visual smoke/regression testing if editor UI changes continue.
-- Add release/publish workflow only when distribution is explicitly requested.
+- Add direct graph editing only after an approved plan.
+- Add a generic workflow runtime only after an approved plan that preserves the state-machine/workflow boundary.
+- Add Docker, package publishing, or hosted deployment only when distribution is explicitly requested.
 
 ## 9. Ready-Made Prompt for Starting a New Thread
 
-Read `handoff.md` as the hot-context source for current state. Review `AGENTS.md`, `README.md`, `src/lib/stateMachine.ts`, `src/lib/workflow.ts`, `src/App.tsx`, `src/styles.css`, `vite.config.ts`, and `docs/plans/state-workflow-editor.md` before changing code. Preserve the separation between the pure state-machine core, the workflow contract layer, and any future runtime workflow engine. App/package version is `1.0.0`; state-machine `definitionVersion` and workflow `workflowVersion` remain user-controlled export metadata. Run `npm run verify` before committing.
+Read `handoff.md` as the hot-context source for current state. Review `AGENTS.md`, `README.md`, `src/lib/workflow.ts`, `src/App.tsx`, `src/App.test.tsx`, `src/lib/workflow.test.ts`, and `docs/plans/state-workflow-editor.md` before changing code. Preserve the separation between the pure state-machine core, the workflow contract layer, and any future runtime workflow engine. The app/package version is `1.0.1`; workflow schema is `0.4.0`; buckets are optional presentation overlays and must not affect action validity. Continue from clean `main`, distinguish confirmed current state from new recommendations, and load broader docs only when the task requires them.

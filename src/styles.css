@@ -95,6 +95,11 @@ button.secondary.active {
   color: var(--warning);
 }
 
+button.secondary.danger {
+  border-color: var(--error-text);
+  color: var(--error-text);
+}
+
 button.ghost {
   border-color: var(--border);
   background: transparent;
@@ -411,7 +416,7 @@ button:focus-visible {
 }
 
 .state-row {
-  grid-template-columns: 30px minmax(88px, 0.65fr) minmax(120px, 1fr) auto auto auto;
+  grid-template-columns: 30px minmax(160px, 1fr) auto auto;
 }
 
 .state-row.selected {
@@ -469,21 +474,6 @@ button:focus-visible {
   background: currentColor;
 }
 
-.state-select {
-  overflow: hidden;
-  border-color: transparent;
-  background: transparent;
-  color: var(--text-primary);
-  padding: 0 4px;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.state-select[aria-pressed="true"] {
-  color: var(--accent-strong);
-}
-
 .inline-check {
   display: flex;
   align-items: center;
@@ -497,15 +487,6 @@ button:focus-visible {
 .inline-check input {
   width: 16px;
   min-height: 16px;
-}
-
-.state-reorder-controls {
-  display: flex;
-  gap: 4px;
-}
-
-.state-reorder-controls button {
-  min-width: 40px;
 }
 
 .transition-row {
@@ -576,9 +557,9 @@ button:focus-visible {
 .workflow-action-header {
   display: grid;
   grid-template-areas:
-    "spacer label from to action order"
-    "spacer trigger visible handler handler order";
-  grid-template-columns: 30px minmax(150px, 1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) auto auto;
+    "spacer label from to action"
+    "spacer trigger visible handler handler";
+  grid-template-columns: 30px minmax(150px, 1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) auto;
   gap: 6px 8px;
   padding: 0 8px;
   color: var(--text-muted);
@@ -590,9 +571,9 @@ button:focus-visible {
 .workflow-action-row {
   display: grid;
   grid-template-areas:
-    "drag label from to remove order"
-    "drag trigger visible handler handler order";
-  grid-template-columns: 30px minmax(150px, 1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) auto auto;
+    "drag label from to remove"
+    "drag trigger visible handler handler";
+  grid-template-columns: 30px minmax(150px, 1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) auto;
   gap: 8px;
   align-items: center;
   border: 1px solid var(--border-subtle);
@@ -640,11 +621,6 @@ button:focus-visible {
   grid-area: remove;
 }
 
-.workflow-action-header-order,
-.workflow-action-row .state-reorder-controls {
-  grid-area: order;
-}
-
 .workflow-action-row .state-drag-handle {
   grid-area: drag;
   align-self: stretch;
@@ -673,7 +649,7 @@ button:focus-visible {
 }
 
 .bucket-row {
-  grid-template-columns: 30px minmax(160px, 1fr) auto auto auto auto;
+  grid-template-columns: 30px minmax(160px, 1fr) auto auto auto;
 }
 
 .bucket-row.selected,

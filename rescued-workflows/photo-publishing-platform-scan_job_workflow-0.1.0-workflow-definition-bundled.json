@@ -1,0 +1,381 @@
+{
+  "schemaVersion": "0.3.0",
+  "appName": "photo-publishing-platform",
+  "workflowVersion": "0.1.0",
+  "id": "scan_job_workflow",
+  "stateMachine": {
+    "id": "my_photo_publisher_state",
+    "definitionVersion": "0.1.2"
+  },
+  "states": [
+    {
+      "id": "queued",
+      "visible": true
+    },
+    {
+      "id": "running",
+      "visible": true
+    },
+    {
+      "id": "completed",
+      "visible": true
+    },
+    {
+      "id": "failed",
+      "visible": true
+    },
+    {
+      "id": "cancelled",
+      "visible": true
+    }
+  ],
+  "actions": [
+    {
+      "id": "start",
+      "label": "Start",
+      "from": "queued",
+      "to": "running",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "complete",
+      "label": "Complete",
+      "from": "running",
+      "to": "completed",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "fail",
+      "label": "Fail",
+      "from": "running",
+      "to": "failed",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "review_3",
+      "label": "review",
+      "from": "failed",
+      "to": "needs_review",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "cancel_queued",
+      "label": "Cancel",
+      "from": "queued",
+      "to": "cancelled",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "cancel_running",
+      "label": "Cancel",
+      "from": "running",
+      "to": "cancelled",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "metadata_good",
+      "label": "metadata_good",
+      "from": "metadata_extracted",
+      "to": "needs_review",
+      "trigger": "automatic",
+      "visible": false
+    },
+    {
+      "id": "metadata_fail",
+      "label": "metadata_fail",
+      "from": "metadata_extracted",
+      "to": "needs_review",
+      "trigger": "automatic",
+      "visible": false
+    },
+    {
+      "id": "review",
+      "label": "review",
+      "from": "metadata_failed",
+      "to": "needs_review",
+      "trigger": "automatic",
+      "visible": true
+    },
+    {
+      "id": "archive",
+      "label": "archive",
+      "from": "metadata_failed",
+      "to": "needs_review",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "approve",
+      "label": "approve",
+      "from": "needs_review",
+      "to": "approved",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "archive_2",
+      "label": "archive",
+      "from": "needs_review",
+      "to": "archived",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "post",
+      "label": "post",
+      "from": "approved",
+      "to": "in_progress",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "dispatch",
+      "label": "dispatch",
+      "from": "approved",
+      "to": "dispatching",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "dispatch_2",
+      "label": "dispatch",
+      "from": "in_progress",
+      "to": "dispatching",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "completed",
+      "label": "completed",
+      "from": "in_progress",
+      "to": "completed",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "partial",
+      "label": "partial",
+      "from": "dispatching",
+      "to": "partial",
+      "trigger": "automatic",
+      "visible": false
+    },
+    {
+      "id": "completed_2",
+      "label": "completed",
+      "from": "dispatching",
+      "to": "completed",
+      "trigger": "automatic",
+      "visible": false
+    },
+    {
+      "id": "fail_2",
+      "label": "fail",
+      "from": "dispatching",
+      "to": "failed",
+      "trigger": "automatic",
+      "visible": false
+    },
+    {
+      "id": "review_2",
+      "label": "review",
+      "from": "partial",
+      "to": "needs_review",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "archive_3",
+      "label": "archive",
+      "from": "partial",
+      "to": "archived",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "archive_4",
+      "label": "archive",
+      "from": "completed",
+      "to": "archived",
+      "trigger": "user",
+      "visible": true
+    },
+    {
+      "id": "archive_5",
+      "label": "archive",
+      "from": "failed",
+      "to": "archived",
+      "trigger": "user",
+      "visible": true
+    }
+  ],
+  "buckets": [
+    {
+      "id": "review",
+      "label": "Review",
+      "visible": true,
+      "states": [
+        "metadata_extracted",
+        "metadata_failed",
+        "needs_review"
+      ]
+    },
+    {
+      "id": "approved",
+      "label": "Approved",
+      "visible": true,
+      "states": [
+        "approved"
+      ]
+    },
+    {
+      "id": "manual_posts",
+      "label": "Manual Posts",
+      "visible": true,
+      "states": [
+        "in_progress"
+      ]
+    },
+    {
+      "id": "dispatching",
+      "label": "Dispatching",
+      "visible": true,
+      "states": [
+        "dispatching"
+      ]
+    },
+    {
+      "id": "completed",
+      "label": "Completed",
+      "visible": true,
+      "states": [
+        "completed"
+      ]
+    },
+    {
+      "id": "partial",
+      "label": "Partial",
+      "visible": true,
+      "states": [
+        "partial"
+      ]
+    },
+    {
+      "id": "failed",
+      "label": "Failed",
+      "visible": true,
+      "states": [
+        "failed"
+      ]
+    },
+    {
+      "id": "archive",
+      "label": "Archive",
+      "visible": true,
+      "states": [
+        "archived"
+      ]
+    }
+  ],
+  "embeddedStateMachineDefinition": {
+    "schemaVersion": "0.2.0",
+    "appName": "photo-publishing-platform",
+    "definitionVersion": "0.1.2",
+    "id": "my_photo_publisher_state",
+    "states": [
+      "metadata_extracted",
+      "metadata_failed",
+      "needs_review",
+      "approved",
+      "in_progress",
+      "dispatching",
+      "partial",
+      "completed",
+      "failed",
+      "archived"
+    ],
+    "terminalStates": [
+      "archived"
+    ],
+    "transitions": [
+      {
+        "from": "approved",
+        "to": "dispatching"
+      },
+      {
+        "from": "approved",
+        "to": "in_progress"
+      },
+      {
+        "from": "dispatching",
+        "to": "completed"
+      },
+      {
+        "from": "dispatching",
+        "to": "failed"
+      },
+      {
+        "from": "dispatching",
+        "to": "partial"
+      },
+      {
+        "from": "in_progress",
+        "to": "dispatching"
+      },
+      {
+        "from": "metadata_extracted",
+        "to": "needs_review"
+      },
+      {
+        "from": "needs_review",
+        "to": "approved"
+      },
+      {
+        "from": "metadata_extracted",
+        "to": "metadata_failed"
+      },
+      {
+        "from": "metadata_failed",
+        "to": "needs_review"
+      },
+      {
+        "from": "in_progress",
+        "to": "completed"
+      },
+      {
+        "from": "partial",
+        "to": "needs_review"
+      },
+      {
+        "from": "completed",
+        "to": "archived"
+      },
+      {
+        "from": "failed",
+        "to": "needs_review"
+      },
+      {
+        "from": "failed",
+        "to": "archived"
+      },
+      {
+        "from": "metadata_failed",
+        "to": "archived"
+      },
+      {
+        "from": "needs_review",
+        "to": "archived"
+      },
+      {
+        "from": "partial",
+        "to": "archived"
+      }
+    ]
+  }
+}

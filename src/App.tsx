@@ -66,6 +66,13 @@ type WorkflowBucketWithIndex = WorkflowBucket<string> & {
   index: number;
 };
 
+type WorkflowReconciliationSummary = {
+  addedStateEntries: number;
+  removedStateEntries: number;
+  removedActions: number;
+  removedBucketStateAssignments: number;
+};
+
 type ActivePage = "state-machine" | "workflow" | "settings";
 type WorkflowEditorView = "actions" | "buckets";
 
@@ -211,6 +218,23 @@ export function App() {
       setWorkflowValidationDialogOpen(false);
     }
   }, [workflowValidation.valid]);
+
+  useEffect(() => {
+    setWorkflow((current) => {
+      const reconciliation = reconcileWorkflowToStateMachine(current, definition);
+      const message = formatWorkflowSyncMessage(reconciliation.summary);
+
+      if (!reconciliation.changed) {
+        return current;
+      }
+
+      if (message) {
+        setWorkflowMessage(message);
+      }
+
+      return reconciliation.workflow;
+    });
+  }, [definition]);
 
   function updateId(id: string) {
     setDefinition((current) => ({ ...current, id }));
@@ -550,13 +574,22 @@ export function App() {
   }
 
   function removeWorkflowBucket(index: number) {
+    const bucket = workflow.buckets[index];
+
+    if (!bucket) {
+      return;
+    }
+
+    if (
+      bucket.states.length > 0 &&
+      !window.confirm(
+        "Remove this bucket? Its state assignments will be removed, but workflow actions and the state machine will not change.",
+      )
+    ) {
+      return;
+    }
+
     setWorkflow((current) => {
-      const bucket = current.buckets[index];
-
-      if (!bucket || current.buckets.length <= 1 || bucket.states.length > 0) {
-        return current;
-      }
-
       const nextBuckets = current.buckets.filter((_, bucketIndex) => bucketIndex !== index);
 
       setSelectedBucketId(nextBuckets[Math.max(0, index - 1)]?.id ?? nextBuckets[0]?.id ?? "");
@@ -597,6 +630,23 @@ export function App() {
     }
 
     setWorkflow((current) => removeStateFromBucket(current, state, selectedBucket.id));
+  }
+
+  function resetWorkflow() {
+    const confirmed = window.confirm(
+      "Reset workflow actions and bucket structure? This removes workflow actions and buckets, but keeps the state machine definition.",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const nextWorkflow = resetWorkflowFromStateMachine(workflow, definition);
+
+    setWorkflow(nextWorkflow);
+    setSelectedBucketId(nextWorkflow.buckets[0]?.id ?? "");
+    setDraftStateBucketId(null);
+    setWorkflowMessage("Workflow reset from current state machine.");
   }
 
   function updateLogoUrl(logoUrl: string) {
@@ -743,7 +793,9 @@ export function App() {
 
       const nextWorkflow = normalizeImportedWorkflowDefinition(parsed as ImportedWorkflowDefinition, definition);
       const effectiveStateMachine = nextWorkflow.embeddedStateMachineDefinition ?? definition;
-      const result = validateWorkflowDefinition(nextWorkflow, effectiveStateMachine);
+      const reconciliation = reconcileWorkflowToStateMachine(nextWorkflow, effectiveStateMachine);
+      const reconciledWorkflow = reconciliation.workflow;
+      const result = validateWorkflowDefinition(reconciledWorkflow, effectiveStateMachine);
 
       if (!result.valid) {
         setWorkflowMessage(result.errors.map((error) => error.message).join(" "));
@@ -755,9 +807,9 @@ export function App() {
         setSelectedState(nextWorkflow.embeddedStateMachineDefinition.states[0] ?? "");
       }
 
-      setWorkflow(removeEmbeddedStateMachine(nextWorkflow));
-      setSelectedBucketId(nextWorkflow.buckets[0]?.id ?? "");
-      setWorkflowMessage(null);
+      setWorkflow(removeEmbeddedStateMachine(reconciledWorkflow));
+      setSelectedBucketId(reconciledWorkflow.buckets[0]?.id ?? "");
+      setWorkflowMessage(formatWorkflowSyncMessage(reconciliation.summary));
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Unable to parse the selected file.";
       setWorkflowMessage(`Invalid JSON. Choose a valid workflow or state-machine .json file. ${detail}`);
@@ -835,6 +887,9 @@ export function App() {
             <>
               <button type="button" className="secondary" onClick={() => workflowFileInputRef.current?.click()}>
                 Import Workflow
+              </button>
+              <button type="button" className="secondary danger" onClick={resetWorkflow}>
+                Reset Workflow
               </button>
               <button type="button" onClick={() => exportWorkflowDefinition(false)} disabled={!workflowValidation.valid}>
                 Export Workflow
@@ -1136,7 +1191,6 @@ export function App() {
                       <span className="workflow-action-header-visible">Visible</span>
                       <span className="workflow-action-header-handler">Handler Key</span>
                       <span className="workflow-action-header-action">Action</span>
-                      <span className="workflow-action-header-order">Order</span>
                     </div>
                   </div>
                   <div className="column-scroll">
@@ -1513,12 +1567,11 @@ function StateList({
                 <span />
               </span>
             </button>
-            <button type="button" className="state-select" onClick={() => onSelect(state)} aria-pressed={isSelected}>
-              {rowLabel}
-            </button>
             <input
               aria-label={`State ${index + 1} ID`}
               value={state}
+              onClick={() => onSelect(state)}
+              onFocus={() => onSelect(state)}
               onChange={(event) => onRename(index, event.target.value)}
               spellCheck={false}
             />
@@ -1535,26 +1588,6 @@ function StateList({
             <button type="button" className="ghost compact" onClick={() => onRemove(index)}>
               Remove
             </button>
-            <div className="state-reorder-controls" aria-label={`${rowLabel} keyboard reorder controls`}>
-              <button
-                type="button"
-                className="ghost compact"
-                onClick={() => onReorder(index, index - 1)}
-                disabled={index === 0}
-                aria-label={`Move ${rowLabel} up`}
-              >
-                Up
-              </button>
-              <button
-                type="button"
-                className="ghost compact"
-                onClick={() => onReorder(index, index + 1)}
-                disabled={index === states.length - 1}
-                aria-label={`Move ${rowLabel} down`}
-              >
-                Down
-              </button>
-            </div>
           </article>
         );
       })}
@@ -1756,26 +1789,6 @@ function WorkflowActionList({
             <button type="button" className="ghost compact workflow-action-remove" onClick={() => onRemove(action.index)}>
               Remove
             </button>
-            <div className="state-reorder-controls" aria-label={`${actionLabel} action keyboard reorder controls`}>
-              <button
-                type="button"
-                className="ghost compact"
-                onClick={() => onReorder(visibleIndex, visibleIndex - 1)}
-                disabled={visibleIndex === 0}
-                aria-label={`Move ${actionLabel} action up`}
-              >
-                Up
-              </button>
-              <button
-                type="button"
-                className="ghost compact"
-                onClick={() => onReorder(visibleIndex, visibleIndex + 1)}
-                disabled={visibleIndex === actions.length - 1}
-                aria-label={`Move ${actionLabel} action down`}
-              >
-                Down
-              </button>
-            </div>
           </article>
         );
       })}
@@ -1842,7 +1855,6 @@ function WorkflowBucketList({
     <div className="workflow-bucket-list" role="list" aria-label="Workflow bucket list">
       {buckets.map((bucket) => {
         const isSelected = bucket.id === selectedBucketId;
-        const removeDisabled = buckets.length <= 1 || bucket.states.length > 0;
         const bucketLabel = bucket.label || bucket.id || `Bucket ${bucket.index + 1}`;
         const rowClasses = [
           "bucket-row",
@@ -1913,37 +1925,10 @@ function WorkflowBucketList({
                 event.stopPropagation();
                 onRemove(bucket.index);
               }}
-              disabled={removeDisabled}
-              title={removeDisabled ? "Move states out before removing this bucket" : "Remove bucket"}
+              title="Remove bucket"
             >
               Remove
             </button>
-            <div className="state-reorder-controls" aria-label={`${bucketLabel} bucket keyboard reorder controls`}>
-              <button
-                type="button"
-                className="ghost compact"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onReorder(bucket.index, bucket.index - 1);
-                }}
-                disabled={bucket.index === 0}
-                aria-label={`Move ${bucketLabel} bucket up`}
-              >
-                Up
-              </button>
-              <button
-                type="button"
-                className="ghost compact"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onReorder(bucket.index, bucket.index + 1);
-                }}
-                disabled={bucket.index === buckets.length - 1}
-                aria-label={`Move ${bucketLabel} bucket down`}
-              >
-                Down
-              </button>
-            </div>
           </article>
         );
       })}
@@ -2275,6 +2260,30 @@ function titleCaseAction(actionId: string) {
     .join(" ");
 }
 
+function transitionKey(from: string, to: string) {
+  return `${from}->${to}`;
+}
+
+function pluralize(label: string, count: number) {
+  if (count !== 1 && label.endsWith("entry")) {
+    return `${label.slice(0, -"entry".length)}entries`;
+  }
+
+  return count === 1 ? label : `${label}s`;
+}
+
+function toSentence(parts: readonly string[]) {
+  if (parts.length <= 1) {
+    return parts[0] ?? "";
+  }
+
+  if (parts.length === 2) {
+    return `${parts[0]} and ${parts[1]}`;
+  }
+
+  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+}
+
 function assignStateToBucket(
   workflow: EditableWorkflowDefinition,
   state: string,
@@ -2318,6 +2327,126 @@ function removeStateFromBucket(
         : bucket,
     ),
   };
+}
+
+function reconcileWorkflowToStateMachine(
+  workflow: EditableWorkflowDefinition,
+  stateMachine: EditableDefinition,
+): { workflow: EditableWorkflowDefinition; summary: WorkflowReconciliationSummary; changed: boolean } {
+  const stateSet = new Set(stateMachine.states);
+  const transitionSet = new Set(stateMachine.transitions.map((transition) => transitionKey(transition.from, transition.to)));
+  const currentStatesById = new Map(workflow.states.map((state) => [state.id, state]));
+  const summary: WorkflowReconciliationSummary = {
+    addedStateEntries: 0,
+    removedStateEntries: 0,
+    removedActions: 0,
+    removedBucketStateAssignments: 0,
+  };
+
+  const states = stateMachine.states.map((state) => {
+    const existingState = currentStatesById.get(state);
+
+    if (!existingState) {
+      summary.addedStateEntries += 1;
+    }
+
+    return {
+      id: state,
+      visible: existingState?.visible ?? true,
+    };
+  });
+
+  summary.removedStateEntries = workflow.states.filter((state) => !stateSet.has(state.id)).length;
+
+  const actions = workflow.actions.filter((action) => {
+    const isCurrentAction =
+      stateSet.has(action.from) && stateSet.has(action.to) && transitionSet.has(transitionKey(action.from, action.to));
+
+    if (!isCurrentAction) {
+      summary.removedActions += 1;
+    }
+
+    return isCurrentAction;
+  });
+
+  const reconciledBuckets = workflow.buckets.map((bucket) => {
+    const bucketStates: string[] = [];
+
+    for (const state of bucket.states) {
+      if (!stateSet.has(state)) {
+        summary.removedBucketStateAssignments += 1;
+        continue;
+      }
+
+      bucketStates.push(state);
+    }
+
+    return {
+      ...bucket,
+      states: bucketStates,
+    };
+  });
+
+  const reconciledWorkflow = {
+    ...workflow,
+    stateMachine: {
+      id: stateMachine.id,
+      definitionVersion: stateMachine.definitionVersion,
+    },
+    states,
+    actions,
+    buckets: reconciledBuckets,
+  };
+
+  return {
+    workflow: reconciledWorkflow,
+    summary,
+    changed: JSON.stringify(reconciledWorkflow) !== JSON.stringify(workflow),
+  };
+}
+
+function resetWorkflowFromStateMachine(
+  workflow: EditableWorkflowDefinition,
+  stateMachine: EditableDefinition,
+): EditableWorkflowDefinition {
+  return {
+    ...workflow,
+    stateMachine: {
+      id: stateMachine.id,
+      definitionVersion: stateMachine.definitionVersion,
+    },
+    states: stateMachine.states.map((state) => ({ id: state, visible: true })),
+    actions: [],
+    buckets: createDefaultWorkflowBuckets(stateMachine.states),
+  };
+}
+
+function formatWorkflowSyncMessage(summary: WorkflowReconciliationSummary) {
+  const updates: string[] = [];
+
+  if (summary.removedActions > 0) {
+    updates.push(`removed ${summary.removedActions} stale ${pluralize("action", summary.removedActions)}`);
+  }
+
+  if (summary.removedStateEntries > 0) {
+    updates.push(`removed ${summary.removedStateEntries} stale ${pluralize("state entry", summary.removedStateEntries)}`);
+  }
+
+  if (summary.addedStateEntries > 0) {
+    updates.push(`added ${summary.addedStateEntries} ${pluralize("state entry", summary.addedStateEntries)}`);
+  }
+
+  if (summary.removedBucketStateAssignments > 0) {
+    updates.push("updated bucket assignments");
+  }
+
+  if (updates.length === 0) {
+    return null;
+  }
+
+  const updateSummary = toSentence(updates);
+
+  return `Workflow synced to current state machine. ${updateSummary.charAt(0).toUpperCase()}${updateSummary.slice(1)}.`;
 }
 
 function normalizeImportedDefinition(value: Partial<EditableDefinition>): EditableDefinition {
@@ -2384,12 +2513,12 @@ function normalizeImportedWorkflowDefinition(
     embeddedStateMachineDefinition,
     states: normalizeImportedWorkflowStates(value.states, effectiveStateMachine.states),
     actions: normalizeImportedWorkflowActions(value.actions),
-    buckets: normalizeImportedWorkflowBuckets(value.buckets, effectiveStateMachine.states),
+    buckets: normalizeImportedWorkflowBuckets(value.buckets),
   };
 }
 
 function normalizeImportedWorkflowSchemaVersion(schemaVersion: string | undefined): typeof WORKFLOW_SCHEMA_VERSION {
-  return (schemaVersion === "0.1.0" || schemaVersion === "0.2.0"
+  return (schemaVersion === "0.1.0" || schemaVersion === "0.2.0" || schemaVersion === "0.3.0"
     ? WORKFLOW_SCHEMA_VERSION
     : schemaVersion ?? WORKFLOW_SCHEMA_VERSION) as typeof WORKFLOW_SCHEMA_VERSION;
 }
@@ -2442,9 +2571,9 @@ function normalizeImportedWorkflowActions(value: unknown): WorkflowAction<string
   });
 }
 
-function normalizeImportedWorkflowBuckets(value: unknown, states: readonly string[]): WorkflowBucket<string>[] {
+function normalizeImportedWorkflowBuckets(value: unknown): WorkflowBucket<string>[] {
   if (!Array.isArray(value)) {
-    return createDefaultWorkflowBuckets(states);
+    return [];
   }
 
   return value.map((bucket, index) => {

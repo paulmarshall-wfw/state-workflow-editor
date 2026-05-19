@@ -43,7 +43,7 @@ Add a new workflow definition shape:
 
 ```json
 {
-  "schemaVersion": "0.2.0",
+  "schemaVersion": "0.4.0",
   "appName": "Example Project",
   "workflowVersion": "0.1.0",
   "id": "scan_job_workflow",
@@ -91,7 +91,7 @@ Bundled workflow exports preserve the same reference fields and add the full sta
 
 ```json
 {
-  "schemaVersion": "0.2.0",
+  "schemaVersion": "0.4.0",
   "appName": "Example Project",
   "workflowVersion": "0.1.0",
   "id": "scan_job_workflow",
@@ -153,7 +153,7 @@ The workflow layer may validate action mappings, but must not enforce app author
 - Bucket IDs must be lowercase snake_case and unique.
 - Bucket labels are required.
 - Bucket states must exist in the linked state-machine definition.
-- Every state must be assigned to exactly one bucket.
+- Buckets are optional presentation metadata. States do not need bucket assignments, and duplicate or empty bucket assignments do not affect action validity.
 
 ### Export Rules
 - State-machine export remains:
@@ -164,9 +164,10 @@ The workflow layer may validate action mappings, but must not enforce app author
   - `(target-project)-(workflow-version)-workflow-definition-bundled.json`
 - Linked workflow JSON references the linked state-machine definition but does not embed it.
 - Bundled workflow JSON includes both the reference and `embeddedStateMachineDefinition`.
+- Linked and bundled workflow exports always include a `buckets` array. If no buckets are present, export `buckets: []`.
 - Importing a linked workflow definition validates it against the currently loaded state-machine definition.
 - Importing a bundled workflow validates the embedded state-machine definition and loads it when valid.
-- Importing older workflow schema `0.1.0` files upgrades them in memory by adding a default workflow bucket covering the linked state-machine states.
+- Importing older workflow schema `0.1.0`, `0.2.0`, or `0.3.0` files upgrades them in memory to the current workflow schema. Missing `buckets` imports as `[]`.
 
 ## Implementation Plan
 
@@ -237,7 +238,7 @@ The workflow layer may validate action mappings, but must not enforce app author
   - workflow page renders current linked state-machine metadata
   - adding/editing/removing workflow actions
   - adding/editing/removing workflow buckets
-  - assigning states to exactly one workflow bucket
+  - assigning, removing, and exporting optional workflow bucket overlays
   - workflow validation blocks export
   - linked workflow import/export uses the new workflow filename rule
   - bundled workflow import/export uses the bundled filename rule and embedded definition
@@ -248,5 +249,5 @@ The workflow layer may validate action mappings, but must not enforce app author
 - The default workflow definition is a **separate linked file**; bundled export is an explicit second option.
 - The first workflow layer is a contract/editor layer, not a runtime execution engine.
 - Apps may choose build-time or runtime ingestion later; this project only produces validated artifacts for either path.
-- State-machine schema remains `0.2.0`; workflow schema is `0.2.0` after adding exported workflow buckets.
+- State-machine schema remains `0.2.0`; workflow schema is `0.4.0` after making exported workflow buckets an optional presentation overlay.
 - The current repo stays local-first with file import/export only.

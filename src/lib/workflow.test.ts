@@ -142,7 +142,7 @@ describe("workflow definition validation", () => {
     expect(result.errors.map((error) => error.code)).toContain("unknown_bucket_state");
   });
 
-  it("rejects duplicate bucket state assignments", () => {
+  it("allows duplicate bucket state assignments because buckets are presentation metadata", () => {
     const result = validateWorkflowDefinition(
       {
         ...workflow,
@@ -154,19 +154,19 @@ describe("workflow definition validation", () => {
       stateMachine,
     );
 
-    expect(result.errors.map((error) => error.code)).toContain("duplicate_bucket_state");
+    expect(result.valid).toBe(true);
   });
 
-  it("rejects unmapped bucket states", () => {
+  it("allows unmapped states and empty bucket overlays", () => {
     const result = validateWorkflowDefinition(
       {
         ...workflow,
-        buckets: [{ id: "waiting", label: "Waiting", visible: true, states: ["queued"] }],
+        buckets: [],
       },
       stateMachine,
     );
 
-    expect(result.errors.map((error) => error.code)).toContain("unmapped_bucket_state");
+    expect(result.valid).toBe(true);
   });
 
   it("rejects unknown action states", () => {
@@ -266,7 +266,7 @@ describe("workflow definition validation", () => {
     );
   });
 
-  it("rejects user actions from hidden workflow states or hidden buckets", () => {
+  it("keeps user actions valid when workflow states or buckets are hidden", () => {
     const hiddenStateResult = validateWorkflowDefinition(
       {
         ...workflow,
@@ -282,8 +282,8 @@ describe("workflow definition validation", () => {
       stateMachine,
     );
 
-    expect(hiddenStateResult.errors.map((error) => error.code)).toContain("hidden_user_action_state");
-    expect(hiddenBucketResult.errors.map((error) => error.code)).toContain("hidden_user_action_state");
+    expect(hiddenStateResult.valid).toBe(true);
+    expect(hiddenBucketResult.valid).toBe(true);
   });
 
   it("accepts valid handler keys and rejects app-specific handler names that are not string identifiers", () => {
