@@ -213,7 +213,7 @@ describe("App", () => {
       transitions: [{ from: "queued", to: "running" }],
     } as const;
     const workflow = {
-      schemaVersion: "0.4.0",
+      schemaVersion: "0.5.0",
       appName: "Example Project",
       workflowVersion: "0.1.0",
       id: "scan_job_workflow",
@@ -224,6 +224,7 @@ describe("App", () => {
       ],
       actions: [{ id: "start", label: "Start", from: "queued", to: "running", trigger: "user", visible: true }],
       buckets: [{ id: "workflow", label: "Workflow", visible: true, states: ["queued", "running"] }],
+      hooks: [],
     } as const;
 
     expect(buildWorkflowMermaidDiagram(definition, workflow)).toContain("queued -->|start| running");
@@ -243,7 +244,7 @@ describe("App", () => {
       ],
     } as const;
     const workflow = {
-      schemaVersion: "0.4.0",
+      schemaVersion: "0.5.0",
       appName: "Example Project",
       workflowVersion: "0.1.0",
       id: "scan_job_workflow",
@@ -258,6 +259,7 @@ describe("App", () => {
         { id: "complete", label: "Complete", from: "running", to: "completed", trigger: "user", visible: true },
       ],
       buckets: [{ id: "waiting", label: "Waiting", visible: true, states: ["queued"] }],
+      hooks: [],
     } as const;
     const defaultSource = buildWorkflowMermaidDiagram(definition, workflow);
     const focusedSource = buildWorkflowMermaidDiagram(definition, workflow, "light", ["queued"]);
@@ -1038,7 +1040,7 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Export Bundled Workflow" })).toBeDisabled();
   });
 
-  it("edits workflow action trigger visibility and handler metadata with validation", async () => {
+  it("edits workflow action trigger visibility and keeps handler metadata out of actions", async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -1046,7 +1048,7 @@ describe("App", () => {
 
     expect(screen.getByLabelText("Action 1 trigger")).toHaveValue("user");
     expect(screen.getByLabelText("Action 1 visible")).toBeChecked();
-    expect(screen.getByLabelText("Action 1 handler key")).toHaveValue("");
+    expect(screen.queryByLabelText("Action 1 handler key")).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Action 1 trigger"), "automatic");
 
@@ -1061,21 +1063,48 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Close workflow validation issues" }));
 
     await user.click(screen.getByLabelText("Action 1 visible"));
-    await user.type(screen.getByLabelText("Action 1 handler key"), "Publish Photo");
+
+    expect(screen.getByRole("button", { name: "Export Workflow" })).toBeEnabled();
+  });
+
+  it("adds and edits workflow lifecycle hooks with handler validation", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Lifecycle" }));
+
+    expect(screen.getByText("No lifecycle hooks for this workflow.")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Before Transition target"), "start");
+    await user.click(within(screen.getByRole("list", { name: "Before Transition hooks" }).closest("section") as HTMLElement).getByRole("button", { name: "Add Hook" }));
+
+    expect(screen.getByLabelText("Phase")).toHaveValue("Before Transition");
+    expect(screen.getByLabelText("Target")).toHaveValue("start");
+
+    await user.type(screen.getByLabelText("Main Handler Key"), "run_start");
+    await user.type(screen.getByLabelText("Success Handler Key"), "start_ok");
+    await user.type(screen.getByLabelText("Failure Handler Key"), "Start Failed");
 
     expect(
-      within(await openWorkflowValidationIssues(user)).getByText(
-        'Action "start" processing handler key must use lowercase letters, numbers, and underscores.',
-      ),
+      within(await openWorkflowValidationIssues(user)).getByText(/handler key must use lowercase letters/),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Export Workflow" })).toBeDisabled();
+
     await user.click(screen.getByRole("button", { name: "Close workflow validation issues" }));
+    await user.clear(screen.getByLabelText("Failure Handler Key"));
+    await user.type(screen.getByLabelText("Failure Handler Key"), "start_failed");
 
-    await user.clear(screen.getByLabelText("Action 1 handler key"));
-    await user.type(screen.getByLabelText("Action 1 handler key"), "publish_photo");
-
-    expect(screen.queryByText(/processing handler key/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Export Workflow" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+
+    expect(screen.getByText("Before transition")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.getByRole("button", { name: "Lifecycle" })).toHaveClass("active");
+    expect(screen.getByLabelText("Main Handler Key")).toHaveValue("run_start");
   });
 
   it("keeps workflow actions valid when workflow buckets and state metadata are hidden", async () => {
@@ -1139,6 +1168,7 @@ describe("App", () => {
     expect(workflowExport.id).toBe("scan_job_workflow");
     expect(workflowExport.workflowVersion).toBe("0.1.0");
     expect(workflowExport.actions).toEqual([]);
+    expect(workflowExport.hooks).toEqual([]);
     expect(workflowExport.states.map((state: { id: string }) => state.id)).toEqual([
       "queued",
       "running",
@@ -1212,7 +1242,7 @@ describe("App", () => {
     const linkedExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
     const bundledExport = JSON.parse(await readBlobText(write.mock.calls[1][0] as Blob));
 
-    expect(linkedExport.schemaVersion).toBe("0.4.0");
+    expect(linkedExport.schemaVersion).toBe("0.5.0");
     expect(linkedExport.states).toEqual([
       { id: "queued", visible: true },
       { id: "running", visible: true },
@@ -1229,13 +1259,16 @@ describe("App", () => {
       "cancel_running",
     ]);
     expect(linkedExport.actions[0]).toMatchObject({ trigger: "user", visible: true });
+    expect(linkedExport.actions[0]).not.toHaveProperty("processing");
     expect(linkedExport.buckets).toEqual([
       { id: "finished", label: "Finished", visible: true, states: ["completed", "cancelled"] },
       { id: "waiting", label: "Waiting", visible: true, states: ["queued"] },
       { id: "active", label: "Active", visible: true, states: ["running", "failed"] },
     ]);
+    expect(linkedExport.hooks).toEqual([]);
     expect(bundledExport.actions).toEqual(linkedExport.actions);
     expect(bundledExport.buckets).toEqual(linkedExport.buckets);
+    expect(bundledExport.hooks).toEqual(linkedExport.hooks);
     expect(bundledExport.embeddedStateMachineDefinition.id).toBe("scan_job_state");
   });
 
@@ -1284,6 +1317,8 @@ describe("App", () => {
 
     expect(linkedExport.buckets).toEqual([]);
     expect(bundledExport.buckets).toEqual([]);
+    expect(linkedExport.hooks).toEqual([]);
+    expect(bundledExport.hooks).toEqual([]);
     expect(linkedExport.actions.map((action: { id: string }) => action.id)).toEqual([
       "start",
       "complete",
@@ -1330,6 +1365,50 @@ describe("App", () => {
     expect(queryWorkflowBucketLabelValues()).toEqual([]);
     expect(screen.getByText("No bucket selected")).toBeInTheDocument();
     expect(screen.getByText("Add a workflow bucket to map states.")).toBeInTheDocument();
+  });
+
+  it("imports legacy action processing as before-transition lifecycle hooks", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const json = JSON.stringify({
+      schemaVersion: "0.4.0",
+      appName: "Article Manager",
+      workflowVersion: "1.0.0",
+      id: "article_workflow",
+      stateMachine: { id: "scan_job_state", definitionVersion: "0.1.0" },
+      states: ["queued", "running", "completed", "failed", "cancelled"],
+      actions: [
+        {
+          id: "start",
+          label: "Start",
+          from: "queued",
+          to: "running",
+          trigger: "user",
+          visible: true,
+          processing: { handlerKey: "start_scan" },
+        },
+      ],
+      buckets: [],
+    });
+
+    fireEvent.change(screen.getByLabelText("Import workflow JSON definition"), {
+      target: { files: [createTextFile(json, "legacy-workflow.json")] },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Lifecycle" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Main Handler Key")).toHaveValue("start_scan");
+    });
+    expect(screen.getByLabelText("Phase")).toHaveValue("Before Transition");
+    expect(screen.getByLabelText("Target")).toHaveValue("start");
+
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+
+    expect(screen.getByText("Before transition")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Action 1 handler key")).not.toBeInTheDocument();
   });
 
   it("imports linked workflow definitions with explicit empty bucket overlays", async () => {

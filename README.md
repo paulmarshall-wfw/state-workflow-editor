@@ -69,7 +69,7 @@ Workflow definitions keep their own `id` and `workflowVersion` separate. The lin
 
 ```json
 {
-  "schemaVersion": "0.4.0",
+  "schemaVersion": "0.5.0",
   "appName": "Example App",
   "workflowVersion": "0.1.0",
   "id": "scan_job_workflow",
@@ -91,8 +91,7 @@ Workflow definitions keep their own `id` and `workflowVersion` separate. The lin
       "from": "queued",
       "to": "running",
       "trigger": "user",
-      "visible": true,
-      "processing": { "handlerKey": "start_scan" }
+      "visible": true
     },
     {
       "id": "fail",
@@ -122,11 +121,29 @@ Workflow definitions keep their own `id` and `workflowVersion` separate. The lin
       "visible": true,
       "states": ["completed", "cancelled"]
     }
+  ],
+  "hooks": [
+    {
+      "id": "before_transition_start",
+      "phase": "before_transition",
+      "targetType": "action",
+      "targetId": "start",
+      "handlerKey": "start_scan",
+      "onSuccess": { "handlerKey": "start_scan_success" },
+      "onFailure": { "handlerKey": "start_scan_failure" }
+    },
+    {
+      "id": "on_state_entry_running",
+      "phase": "on_state_entry",
+      "targetType": "state",
+      "targetId": "running",
+      "handlerKey": "run_scan"
+    }
   ]
 }
 ```
 
-Workflow buckets, state visibility, action visibility, action trigger mode, and handler keys are exported contract metadata. Bucket IDs and handler keys use lowercase snake_case and labels are required. Buckets are optional UI presentation metadata: a workflow may have no buckets, empty buckets, or partial bucket assignments without invalidating actions. Exports always include the `buckets` array, even when it is empty. Imports from older `0.1.0`, `0.2.0`, and `0.3.0` workflow files are upgraded in memory with visible workflow states and user-visible actions by default; new exports use workflow schema `0.4.0`.
+Workflow buckets, state visibility, action visibility, action trigger mode, and lifecycle handler keys are exported contract metadata. Bucket IDs, hook IDs, and handler keys use lowercase snake_case and labels are required for buckets and actions. Buckets are optional UI presentation metadata: a workflow may have no buckets, empty buckets, or partial bucket assignments without invalidating actions. Lifecycle hooks are optional app-processing metadata and may target action or state lifecycle points. Exports always include the `buckets` and `hooks` arrays, even when either one is empty. Imports from older `0.1.0`, `0.2.0`, `0.3.0`, and `0.4.0` workflow files are upgraded in memory with visible workflow states, user-visible actions by default, empty hooks by default, and legacy `action.processing.handlerKey` values converted to `before_transition` lifecycle hooks; new exports use workflow schema `0.5.0`.
 
 Linked workflow exports use:
 
@@ -146,7 +163,9 @@ A target app is an app that ingests a state-machine definition and workflow defi
 
 The exported workflow is a contract, not an executable workflow engine. Buckets and state visibility describe an optional user-facing workflow surface that a target app may render. Hidden or missing buckets and hidden states remain valid contract metadata choices and do not affect whether actions are valid.
 
-Actions describe how a valid transition is initiated. Actions are grounded in the state-machine states and legal transitions, not in bucket placement. A `user` action must be visible. An `automatic` action must be hidden from user controls. If an action has no `processing.handlerKey`, the target app may commit the transition immediately after accepting the trigger. If a handler key is present, the target app runs its own processing logic for that app-agnostic identifier and commits the state transition only after successful completion.
+Actions describe how a valid transition is initiated. Actions are grounded in the state-machine states and legal transitions, not in bucket placement. A `user` action must be visible. An `automatic` action must be hidden from user controls. Actions do not carry handler keys in schema `0.5.0`.
+
+Lifecycle hooks describe optional app-specific processing points. Supported phases are `before_transition` for action-targeted pre-transition work, `on_state_entry` for state-entry work, `while_in_state` for work that runs while an item remains in a state, and `on_terminal_entry` for terminal-state entry work. Each hook may define a main `handlerKey`, plus optional success and failure handler keys. These keys are identifiers for the target app; this editor does not execute them or guarantee state changes from success or failure.
 
 Failure handling, retries, logging, authorization, idempotency, persistence, job orchestration, and handler implementation stay entirely in the target app.
 
@@ -158,7 +177,7 @@ Failure handling, retries, logging, authorization, idempotency, persistence, job
 - The app has State Machine, Workflow, and Settings pages.
 - The Target App control includes a folder picker that updates both state-machine and workflow app names.
 - The State Machine page uses three independently scrolling columns: states, selected-state transitions, and a read-only Mermaid preview.
-- The Workflow page has Actions and Buckets views. Actions maps named action-button labels onto legal state-machine transitions and lets users set trigger mode, user visibility, and optional handler keys. Buckets lets users edit bucket names directly, toggle bucket visibility, add states to the selected bucket from an all-state dropdown, toggle workflow-level state visibility, and remove states from the selected bucket. Both workflow views retain the action-labelled Mermaid preview; in Buckets view, the selected bucket's states use solid boundaries while all other states use dotted boundaries.
+- The Workflow page has Actions, Buckets, and Lifecycle views. Actions maps named action-button labels onto legal state-machine transitions and lets users set trigger mode and user visibility. Buckets lets users edit bucket names directly, toggle bucket visibility, add states to the selected bucket from an all-state dropdown, toggle workflow-level state visibility, and remove states from the selected bucket. Lifecycle lets users add app-specific handler keys for before-transition, state-entry, while-in-state, and terminal-entry phases, with optional success and failure handler keys. All workflow views retain the action-labelled Mermaid preview; in Buckets view, the selected bucket's states use solid boundaries while all other states use dotted boundaries, and workflows with lifecycle hooks show a compact hook summary in the preview panel.
 
 ## Core API
 

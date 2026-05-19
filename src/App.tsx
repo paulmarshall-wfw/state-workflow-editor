@@ -8,6 +8,8 @@ import {
   WorkflowActionTrigger,
   WorkflowBucket,
   WorkflowDefinition,
+  WorkflowLifecycleHook,
+  WorkflowLifecyclePhase,
   WorkflowValidationError,
   defineStateMachine,
   defineWorkflow,
@@ -66,19 +68,38 @@ type WorkflowBucketWithIndex = WorkflowBucket<string> & {
   index: number;
 };
 
+type WorkflowLifecycleHookWithIndex = WorkflowLifecycleHook<string> & {
+  index: number;
+};
+
 type WorkflowReconciliationSummary = {
   addedStateEntries: number;
   removedStateEntries: number;
   removedActions: number;
   removedBucketStateAssignments: number;
+  removedHooks: number;
 };
 
 type ActivePage = "state-machine" | "workflow" | "settings";
-type WorkflowEditorView = "actions" | "buckets";
+type WorkflowEditorView = "actions" | "buckets" | "lifecycle";
 
 type MermaidPreviewTheme = AppSettings["theme"];
 
 let mermaidPreviewCounter = 0;
+
+const lifecyclePhases: readonly WorkflowLifecyclePhase[] = [
+  "before_transition",
+  "on_state_entry",
+  "while_in_state",
+  "on_terminal_entry",
+];
+
+const lifecyclePhaseLabels: Record<WorkflowLifecyclePhase, string> = {
+  before_transition: "Before Transition",
+  on_state_entry: "On State Entry",
+  while_in_state: "While In State",
+  on_terminal_entry: "On Terminal Entry",
+};
 
 const initialDefinition: EditableDefinition = {
   schemaVersion: STATE_MACHINE_SCHEMA_VERSION,
@@ -120,6 +141,7 @@ const initialWorkflowDefinition: EditableWorkflowDefinition = {
     { id: "active", label: "Active", visible: true, states: ["running", "failed"] },
     { id: "finished", label: "Finished", visible: true, states: ["completed", "cancelled"] },
   ],
+  hooks: [],
 };
 
 const appSettingsStorageKey = "state-workflow-editor-settings";
@@ -136,6 +158,7 @@ export function App() {
   const [selectedState, setSelectedState] = useState(initialDefinition.states[0]);
   const [selectedWorkflowView, setSelectedWorkflowView] = useState<WorkflowEditorView>("actions");
   const [selectedBucketId, setSelectedBucketId] = useState(initialWorkflowDefinition.buckets[0].id);
+  const [selectedLifecycleHookId, setSelectedLifecycleHookId] = useState<string | null>(null);
   const [draftStateBucketId, setDraftStateBucketId] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<ActivePage>("state-machine");
   const [isWorkflowValidationDialogOpen, setWorkflowValidationDialogOpen] = useState(false);
@@ -183,6 +206,9 @@ export function App() {
   const workflowActions = linkedWorkflow.actions
     .map((action, index) => ({ ...action, index }))
     .filter((action) => action.from === selectedState);
+  const workflowHooks = linkedWorkflow.hooks.map((hook, index) => ({ ...hook, index }));
+  const selectedLifecycleHook =
+    workflowHooks.find((hook) => hook.id === selectedLifecycleHookId) ?? workflowHooks[0] ?? null;
   const workflowBuckets = linkedWorkflow.buckets.map((bucket, index) => ({ ...bucket, index }));
   const selectedBucket = workflowBuckets.find((bucket) => bucket.id === selectedBucketId) ?? workflowBuckets[0];
   const selectedBucketStates = selectedBucket?.states ?? [];
@@ -212,6 +238,16 @@ export function App() {
       setDraftStateBucketId(null);
     }
   }, [draftStateBucketId, selectedBucketId]);
+
+  useEffect(() => {
+    if (workflow.hooks.length > 0 && selectedLifecycleHookId && !workflow.hooks.some((hook) => hook.id === selectedLifecycleHookId)) {
+      setSelectedLifecycleHookId(workflow.hooks[0].id);
+    }
+
+    if (workflow.hooks.length === 0 && selectedLifecycleHookId) {
+      setSelectedLifecycleHookId(null);
+    }
+  }, [selectedLifecycleHookId, workflow.hooks]);
 
   useEffect(() => {
     if (workflowValidation.valid) {
@@ -302,6 +338,9 @@ export function App() {
         ...bucket,
         states: bucket.states.map((state) => (state === previousState ? nextState : state)),
       })),
+      hooks: current.hooks.map((hook) =>
+        hook.targetType === "state" && hook.targetId === previousState ? { ...hook, targetId: nextState } : hook,
+      ),
     }));
   }
 
@@ -331,6 +370,7 @@ export function App() {
         ...bucket,
         states: bucket.states.filter((state) => state !== removedState),
       })),
+      hooks: current.hooks.filter((hook) => hook.targetType !== "state" || hook.targetId !== removedState),
     }));
   }
 
@@ -420,15 +460,28 @@ export function App() {
         }
 
         if (field === "label") {
+          const nextId = value.trim() ? uniqueActionIdFromLabel(value, current.actions, index) : action.id;
+
           return {
             ...action,
             label: value,
-            id: value.trim() ? uniqueActionIdFromLabel(value, current.actions, index) : action.id,
+            id: nextId,
           };
         }
 
         return { ...action, [field]: value };
       }),
+      hooks:
+        field === "label"
+          ? current.hooks.map((hook) => {
+              const action = current.actions[index];
+              const nextId = value.trim() ? uniqueActionIdFromLabel(value, current.actions, index) : action?.id;
+
+              return action && hook.targetType === "action" && hook.targetId === action.id
+                ? { ...hook, targetId: nextId ?? hook.targetId }
+                : hook;
+            })
+          : current.hooks,
     }));
   }
 
@@ -458,22 +511,101 @@ export function App() {
     }));
   }
 
-  function updateWorkflowActionHandlerKey(index: number, handlerKey: string) {
+  function selectLifecycleHookForAction(actionId: string) {
+    const hook = workflow.hooks.find(
+      (candidate) =>
+        candidate.phase === "before_transition" &&
+        candidate.targetType === "action" &&
+        candidate.targetId === actionId,
+    );
+
+    if (!hook) {
+      return;
+    }
+
+    setSelectedLifecycleHookId(hook.id);
+    setSelectedWorkflowView("lifecycle");
+  }
+
+  function addLifecycleHook(phase: WorkflowLifecyclePhase, targetId: string) {
+    if (!targetId) {
+      return;
+    }
+
+    const nextHookId = nextUniqueLifecycleHookId(phase, targetId, workflow.hooks);
+
     setWorkflow((current) => ({
       ...current,
-      actions: current.actions.map((action, actionIndex) => {
-        if (actionIndex !== index) {
-          return action;
+      hooks: [
+        ...current.hooks,
+        {
+          id: nextHookId,
+          phase,
+          targetType: phase === "before_transition" ? "action" : "state",
+          targetId,
+        },
+      ],
+    }));
+    setSelectedLifecycleHookId(nextHookId);
+  }
+
+  function updateLifecycleHookTarget(index: number, targetId: string) {
+    setWorkflow((current) => ({
+      ...current,
+      hooks: current.hooks.map((hook, hookIndex) =>
+        hookIndex === index
+          ? {
+              ...hook,
+              targetId,
+            }
+          : hook,
+      ),
+    }));
+  }
+
+  function updateLifecycleHookHandler(
+    index: number,
+    field: "handlerKey" | "onSuccess" | "onFailure",
+    handlerKey: string,
+  ) {
+    setWorkflow((current) => ({
+      ...current,
+      hooks: current.hooks.map((hook, hookIndex) => {
+        if (hookIndex !== index) {
+          return hook;
         }
 
         const trimmedHandlerKey = handlerKey.trim();
 
+        if (field === "handlerKey") {
+          return {
+            ...hook,
+            handlerKey: trimmedHandlerKey || undefined,
+          };
+        }
+
         return {
-          ...action,
-          processing: trimmedHandlerKey ? { handlerKey: trimmedHandlerKey } : undefined,
+          ...hook,
+          [field]: trimmedHandlerKey ? { handlerKey: trimmedHandlerKey } : undefined,
         };
       }),
     }));
+  }
+
+  function removeLifecycleHook(index: number) {
+    setWorkflow((current) => {
+      const removedHook = current.hooks[index];
+      const nextHooks = current.hooks.filter((_, hookIndex) => hookIndex !== index);
+
+      if (removedHook?.id === selectedLifecycleHookId) {
+        setSelectedLifecycleHookId(nextHooks[Math.max(0, index - 1)]?.id ?? nextHooks[0]?.id ?? null);
+      }
+
+      return {
+        ...current,
+        hooks: nextHooks,
+      };
+    });
   }
 
   function moveWorkflowAction(fromVisibleIndex: number, toVisibleIndex: number) {
@@ -497,9 +629,14 @@ export function App() {
   }
 
   function removeWorkflowAction(index: number) {
+    const removedAction = workflow.actions[index];
+
     setWorkflow((current) => ({
       ...current,
       actions: current.actions.filter((_, actionIndex) => actionIndex !== index),
+      hooks: removedAction
+        ? current.hooks.filter((hook) => hook.targetType !== "action" || hook.targetId !== removedAction.id)
+        : current.hooks,
     }));
   }
 
@@ -645,6 +782,7 @@ export function App() {
 
     setWorkflow(nextWorkflow);
     setSelectedBucketId(nextWorkflow.buckets[0]?.id ?? "");
+    setSelectedLifecycleHookId(null);
     setDraftStateBucketId(null);
     setWorkflowMessage("Workflow reset from current state machine.");
   }
@@ -1148,13 +1286,22 @@ export function App() {
               >
                 Buckets
               </button>
+              <button
+                type="button"
+                className={selectedWorkflowView === "lifecycle" ? "active" : ""}
+                onClick={() => setSelectedWorkflowView("lifecycle")}
+              >
+                Lifecycle
+              </button>
             </section>
 
             <section
               className={
                 selectedWorkflowView === "actions"
                   ? "workspace-grid workflow-grid workflow-actions-grid"
-                  : "workspace-grid workflow-grid workflow-buckets-grid"
+                  : selectedWorkflowView === "buckets"
+                    ? "workspace-grid workflow-grid workflow-buckets-grid"
+                    : "workspace-grid workflow-grid workflow-lifecycle-grid"
               }
               aria-label="Workflow editor"
             >
@@ -1189,25 +1336,26 @@ export function App() {
                       <span className="workflow-action-header-to">To State</span>
                       <span className="workflow-action-header-trigger">Trigger</span>
                       <span className="workflow-action-header-visible">Visible</span>
-                      <span className="workflow-action-header-handler">Handler Key</span>
+                      <span className="workflow-action-header-lifecycle">Lifecycle</span>
                       <span className="workflow-action-header-action">Action</span>
                     </div>
                   </div>
                   <div className="column-scroll">
                     <WorkflowActionList
                       actions={workflowActions}
+                      hooks={workflowHooks}
                       selectedState={selectedState}
                       states={stateOptions}
                       onChange={updateWorkflowAction}
                       onTriggerChange={updateWorkflowActionTrigger}
                       onVisibleChange={updateWorkflowActionVisible}
-                      onHandlerKeyChange={updateWorkflowActionHandlerKey}
+                      onSelectLifecycleHook={selectLifecycleHookForAction}
                       onRemove={removeWorkflowAction}
                       onReorder={moveWorkflowAction}
                     />
                   </div>
                 </section>
-              ) : (
+              ) : selectedWorkflowView === "buckets" ? (
                 <>
                   <section className="panel column-panel workflow-bucket-list-panel">
                     <div className="panel-heading">
@@ -1257,6 +1405,33 @@ export function App() {
                         onRemoveState={removeStateFromSelectedBucket}
                       />
                     </div>
+                  </section>
+                </>
+              ) : (
+                <>
+                  <section className="panel column-panel workflow-lifecycle-list-panel">
+                    <WorkflowLifecycleList
+                      hooks={workflowHooks}
+                      actions={linkedWorkflow.actions}
+                      states={stateOptions}
+                      terminalStates={definition.terminalStates}
+                      selectedHookId={selectedLifecycleHook?.id ?? ""}
+                      onAdd={addLifecycleHook}
+                      onSelect={setSelectedLifecycleHookId}
+                    />
+                  </section>
+
+                  <section className="panel column-panel workflow-lifecycle-editor-panel">
+                    <WorkflowLifecycleEditor
+                      hook={selectedLifecycleHook}
+                      hooks={workflowHooks}
+                      actions={linkedWorkflow.actions}
+                      states={stateOptions}
+                      terminalStates={definition.terminalStates}
+                      onTargetChange={updateLifecycleHookTarget}
+                      onHandlerChange={updateLifecycleHookHandler}
+                      onRemove={removeLifecycleHook}
+                    />
                   </section>
                 </>
               )}
@@ -1648,24 +1823,232 @@ function TransitionList({
   );
 }
 
+function WorkflowLifecycleList({
+  hooks,
+  actions,
+  states,
+  terminalStates,
+  selectedHookId,
+  onAdd,
+  onSelect,
+}: {
+  hooks: WorkflowLifecycleHookWithIndex[];
+  actions: readonly WorkflowAction<string>[];
+  states: readonly string[];
+  terminalStates: readonly string[];
+  selectedHookId: string;
+  onAdd: (phase: WorkflowLifecyclePhase, targetId: string) => void;
+  onSelect: (hookId: string) => void;
+}) {
+  const [draftTargets, setDraftTargets] = useState<Partial<Record<WorkflowLifecyclePhase, string>>>({});
+
+  return (
+    <>
+      <div className="panel-heading">
+        <h2>Lifecycle Hooks</h2>
+        <span className="schema-version">{hooks.length}</span>
+      </div>
+      <div className="column-scroll lifecycle-scroll">
+        {hooks.length === 0 ? <div className="empty-lifecycle">No lifecycle hooks for this workflow.</div> : null}
+        {lifecyclePhases.map((phase) => {
+          const phaseHooks = hooks.filter((hook) => hook.phase === phase);
+          const availableTargets = getAvailableLifecycleTargetOptions(phase, hooks, actions, states, terminalStates);
+          const draftTarget = draftTargets[phase] ?? availableTargets[0]?.id ?? "";
+
+          return (
+            <section key={phase} className="lifecycle-phase-section">
+              <div className="lifecycle-phase-heading">
+                <div>
+                  <h3>{lifecyclePhaseLabels[phase]}</h3>
+                  <span>{phaseHooks.length}</span>
+                </div>
+                <div className="lifecycle-add-control">
+                  <select
+                    aria-label={`${lifecyclePhaseLabels[phase]} target`}
+                    value={draftTarget}
+                    onChange={(event) =>
+                      setDraftTargets((current) => ({ ...current, [phase]: event.target.value }))
+                    }
+                    disabled={availableTargets.length === 0}
+                  >
+                    {availableTargets.length === 0 ? (
+                      <option value="">No targets</option>
+                    ) : (
+                      availableTargets.map((target) => (
+                        <option key={target.id} value={target.id}>
+                          {target.label}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                  <button
+                    type="button"
+                    className="secondary compact"
+                    onClick={() => onAdd(phase, draftTarget)}
+                    disabled={!draftTarget}
+                  >
+                    Add Hook
+                  </button>
+                </div>
+              </div>
+              <div className="lifecycle-hook-list" role="list" aria-label={`${lifecyclePhaseLabels[phase]} hooks`}>
+                {phaseHooks.length === 0 ? (
+                  <div className="lifecycle-phase-empty">No hooks</div>
+                ) : (
+                  phaseHooks.map((hook) => {
+                    const hasIssue = isLifecycleHookInvalid(hook, hooks, actions, states, terminalStates);
+
+                    return (
+                      <button
+                        key={hook.id}
+                        type="button"
+                        className={hook.id === selectedHookId ? "lifecycle-hook-row selected" : "lifecycle-hook-row"}
+                        onClick={() => onSelect(hook.id)}
+                      >
+                        <span className="lifecycle-hook-target">
+                          {formatLifecycleTargetLabel(hook, actions)}
+                        </span>
+                        <span className="lifecycle-hook-handler">{hook.handlerKey || "No main handler"}</span>
+                        <span className={hasIssue ? "status error" : "status ok"}>{hasIssue ? "Issue" : "Valid"}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+function WorkflowLifecycleEditor({
+  hook,
+  hooks,
+  actions,
+  states,
+  terminalStates,
+  onTargetChange,
+  onHandlerChange,
+  onRemove,
+}: {
+  hook: WorkflowLifecycleHookWithIndex | null;
+  hooks: WorkflowLifecycleHookWithIndex[];
+  actions: readonly WorkflowAction<string>[];
+  states: readonly string[];
+  terminalStates: readonly string[];
+  onTargetChange: (index: number, targetId: string) => void;
+  onHandlerChange: (
+    index: number,
+    field: "handlerKey" | "onSuccess" | "onFailure",
+    handlerKey: string,
+  ) => void;
+  onRemove: (index: number) => void;
+}) {
+  if (!hook) {
+    return (
+      <>
+        <div className="panel-heading">
+          <h2>Hook Details</h2>
+        </div>
+        <div className="column-scroll">
+          <div className="empty-column">Select or add a lifecycle hook.</div>
+        </div>
+      </>
+    );
+  }
+
+  const targetOptions = getAvailableLifecycleTargetOptions(
+    hook.phase,
+    hooks,
+    actions,
+    states,
+    terminalStates,
+    hook,
+  );
+
+  return (
+    <>
+      <div className="panel-heading">
+        <div>
+          <h2>Hook Details</h2>
+          <p className="panel-subtitle">{hook.id}</p>
+        </div>
+        <button type="button" className="ghost compact danger" onClick={() => onRemove(hook.index)}>
+          Remove
+        </button>
+      </div>
+      <div className="column-scroll">
+        <div className="lifecycle-editor-form">
+          <label htmlFor="lifecycle-phase">Phase</label>
+          <input id="lifecycle-phase" value={lifecyclePhaseLabels[hook.phase]} readOnly />
+
+          <label htmlFor="lifecycle-target">Target</label>
+          <select
+            id="lifecycle-target"
+            value={hook.targetId}
+            onChange={(event) => onTargetChange(hook.index, event.target.value)}
+          >
+            {targetOptions.map((target) => (
+              <option key={target.id} value={target.id}>
+                {target.label}
+              </option>
+            ))}
+          </select>
+
+          <label htmlFor="lifecycle-main-handler">Main Handler Key</label>
+          <input
+            id="lifecycle-main-handler"
+            value={hook.handlerKey ?? ""}
+            onChange={(event) => onHandlerChange(hook.index, "handlerKey", event.target.value)}
+            placeholder="optional_handler"
+            spellCheck={false}
+          />
+
+          <label htmlFor="lifecycle-success-handler">Success Handler Key</label>
+          <input
+            id="lifecycle-success-handler"
+            value={hook.onSuccess?.handlerKey ?? ""}
+            onChange={(event) => onHandlerChange(hook.index, "onSuccess", event.target.value)}
+            placeholder="success_handler"
+            spellCheck={false}
+          />
+
+          <label htmlFor="lifecycle-failure-handler">Failure Handler Key</label>
+          <input
+            id="lifecycle-failure-handler"
+            value={hook.onFailure?.handlerKey ?? ""}
+            onChange={(event) => onHandlerChange(hook.index, "onFailure", event.target.value)}
+            placeholder="failure_handler"
+            spellCheck={false}
+          />
+        </div>
+      </div>
+    </>
+  );
+}
+
 function WorkflowActionList({
   actions,
+  hooks,
   selectedState,
   states,
   onChange,
   onTriggerChange,
   onVisibleChange,
-  onHandlerKeyChange,
+  onSelectLifecycleHook,
   onRemove,
   onReorder,
 }: {
   actions: WorkflowActionWithIndex[];
+  hooks: WorkflowLifecycleHookWithIndex[];
   selectedState: string;
   states: string[];
   onChange: (index: number, field: "label" | "from" | "to", value: string) => void;
   onTriggerChange: (index: number, trigger: WorkflowActionTrigger) => void;
   onVisibleChange: (index: number, visible: boolean) => void;
-  onHandlerKeyChange: (index: number, handlerKey: string) => void;
+  onSelectLifecycleHook: (actionId: string) => void;
   onRemove: (index: number) => void;
   onReorder: (fromVisibleIndex: number, toVisibleIndex: number) => void;
 }) {
@@ -1714,6 +2097,12 @@ function WorkflowActionList({
     <div className="workflow-action-list" role="list" aria-label="Workflow action list">
       {actions.map((action, visibleIndex) => {
         const actionLabel = action.label || action.id || `Action ${action.index + 1}`;
+        const lifecycleHook = hooks.find(
+          (hook) =>
+            hook.phase === "before_transition" &&
+            hook.targetType === "action" &&
+            hook.targetId === action.id,
+        );
         const rowClasses = [
           "workflow-action-row",
           draggedIndex === visibleIndex ? "dragging" : "",
@@ -1789,14 +2178,22 @@ function WorkflowActionList({
               />
               Visible
             </label>
-            <input
-              className="workflow-action-handler-input"
-              aria-label={`Action ${action.index + 1} handler key`}
-              value={action.processing?.handlerKey ?? ""}
-              onChange={(event) => onHandlerKeyChange(action.index, event.target.value)}
-              placeholder="optional_handler"
-              spellCheck={false}
-            />
+            <div className="workflow-action-lifecycle-indicator">
+              {lifecycleHook ? (
+                <>
+                  <span className="lifecycle-badge">Before transition</span>
+                  <button
+                    type="button"
+                    className="ghost compact"
+                    onClick={() => onSelectLifecycleHook(action.id)}
+                  >
+                    Edit
+                  </button>
+                </>
+              ) : (
+                <span className="lifecycle-empty">None</span>
+              )}
+            </div>
             <button type="button" className="ghost compact workflow-action-remove" onClick={() => onRemove(action.index)}>
               Remove
             </button>
@@ -2118,7 +2515,22 @@ function MermaidGraph({
       aria-label={workflow ? "Workflow Mermaid preview" : "State machine Mermaid preview"}
     >
       {svg ? (
-        <div className="mermaid-preview-svg" dangerouslySetInnerHTML={{ __html: svg }} />
+        <>
+          <div className="mermaid-preview-svg" dangerouslySetInnerHTML={{ __html: svg }} />
+          {workflow && workflow.hooks.length > 0 ? (
+            <div className="lifecycle-preview-summary">
+              {lifecyclePhases.map((phase) => {
+                const count = workflow.hooks.filter((hook) => hook.phase === phase).length;
+
+                return count > 0 ? (
+                  <span key={phase}>
+                    {lifecyclePhaseLabels[phase]}: {count}
+                  </span>
+                ) : null;
+              })}
+            </div>
+          ) : null}
+        </>
       ) : (
         <div className="empty-graph">Rendering preview...</div>
       )}
@@ -2220,6 +2632,29 @@ function nextUniqueBucketId(buckets: readonly WorkflowBucket<string>[]) {
   return candidate;
 }
 
+function nextUniqueLifecycleHookId(
+  phase: WorkflowLifecyclePhase,
+  targetId: string,
+  hooks: readonly WorkflowLifecycleHook<string>[],
+) {
+  const baseId = actionIdFromLabel(`${phase}_${targetId}`);
+  const hookIds = hooks.map((hook) => hook.id);
+
+  if (!hookIds.includes(baseId)) {
+    return baseId;
+  }
+
+  let suffix = 2;
+  let candidate = `${baseId}_${suffix}`;
+
+  while (hookIds.includes(candidate)) {
+    suffix += 1;
+    candidate = `${baseId}_${suffix}`;
+  }
+
+  return candidate;
+}
+
 function uniqueActionIdFromLabel(label: string, actions: readonly WorkflowAction<string>[], currentIndex: number) {
   const baseId = actionIdFromLabel(label);
   const existingIds = actions.map((action, index) => (index === currentIndex ? "" : action.id));
@@ -2274,6 +2709,91 @@ function titleCaseAction(actionId: string) {
     .filter(Boolean)
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(" ");
+}
+
+function getLifecycleTargetType(phase: WorkflowLifecyclePhase) {
+  return phase === "before_transition" ? "action" : "state";
+}
+
+function getLifecycleTargetOptions(
+  phase: WorkflowLifecyclePhase,
+  actions: readonly WorkflowAction<string>[],
+  states: readonly string[],
+  terminalStates: readonly string[],
+) {
+  if (phase === "before_transition") {
+    return actions.map((action) => ({ id: action.id, label: action.label || action.id }));
+  }
+
+  const targetStates = phase === "on_terminal_entry" ? terminalStates : states;
+
+  return targetStates.map((state) => ({ id: state, label: state }));
+}
+
+function getAvailableLifecycleTargetOptions(
+  phase: WorkflowLifecyclePhase,
+  hooks: readonly WorkflowLifecycleHook<string>[],
+  actions: readonly WorkflowAction<string>[],
+  states: readonly string[],
+  terminalStates: readonly string[],
+  currentHook?: WorkflowLifecycleHook<string>,
+) {
+  const targetType = getLifecycleTargetType(phase);
+  const occupiedTargets = new Set(
+    hooks
+      .filter((hook) => hook.phase === phase && hook.targetType === targetType && hook.id !== currentHook?.id)
+      .map((hook) => hook.targetId),
+  );
+
+  return getLifecycleTargetOptions(phase, actions, states, terminalStates).filter(
+    (target) => !occupiedTargets.has(target.id) || target.id === currentHook?.targetId,
+  );
+}
+
+function formatLifecycleTargetLabel(hook: WorkflowLifecycleHook<string>, actions: readonly WorkflowAction<string>[]) {
+  if (hook.targetType === "action") {
+    const action = actions.find((candidate) => candidate.id === hook.targetId);
+
+    return action ? `${action.label || action.id} (${action.id})` : hook.targetId;
+  }
+
+  return hook.targetId;
+}
+
+function isWorkflowIdentifier(value: string) {
+  return /^[a-z][a-z0-9_]*$/.test(value);
+}
+
+function isLifecycleHookInvalid(
+  hook: WorkflowLifecycleHook<string>,
+  hooks: readonly WorkflowLifecycleHook<string>[],
+  actions: readonly WorkflowAction<string>[],
+  states: readonly string[],
+  terminalStates: readonly string[],
+) {
+  const targetType = getLifecycleTargetType(hook.phase);
+  const duplicateCount = hooks.filter(
+    (candidate) =>
+      candidate.phase === hook.phase &&
+      candidate.targetType === hook.targetType &&
+      candidate.targetId === hook.targetId,
+  ).length;
+  const validTarget =
+    hook.phase === "before_transition"
+      ? hook.targetType === "action" && actions.some((action) => action.id === hook.targetId)
+      : hook.targetType === "state" &&
+        states.includes(hook.targetId) &&
+        (hook.phase !== "on_terminal_entry" || terminalStates.includes(hook.targetId));
+
+  return (
+    !isWorkflowIdentifier(hook.id) ||
+    hook.targetType !== targetType ||
+    !validTarget ||
+    duplicateCount > 1 ||
+    Boolean(hook.handlerKey && !isWorkflowIdentifier(hook.handlerKey)) ||
+    Boolean(hook.onSuccess?.handlerKey && !isWorkflowIdentifier(hook.onSuccess.handlerKey)) ||
+    Boolean(hook.onFailure?.handlerKey && !isWorkflowIdentifier(hook.onFailure.handlerKey))
+  );
 }
 
 function transitionKey(from: string, to: string) {
@@ -2357,6 +2877,7 @@ function reconcileWorkflowToStateMachine(
     removedStateEntries: 0,
     removedActions: 0,
     removedBucketStateAssignments: 0,
+    removedHooks: 0,
   };
 
   const states = stateMachine.states.map((state) => {
@@ -2384,6 +2905,7 @@ function reconcileWorkflowToStateMachine(
 
     return isCurrentAction;
   });
+  const actionIds = new Set(actions.map((action) => action.id));
 
   const reconciledBuckets = workflow.buckets.map((bucket) => {
     const bucketStates: string[] = [];
@@ -2403,6 +2925,17 @@ function reconcileWorkflowToStateMachine(
     };
   });
 
+  const hooks = workflow.hooks.filter((hook) => {
+    const isCurrentHook =
+      hook.targetType === "action" ? actionIds.has(hook.targetId) : stateSet.has(hook.targetId);
+
+    if (!isCurrentHook) {
+      summary.removedHooks += 1;
+    }
+
+    return isCurrentHook;
+  });
+
   const reconciledWorkflow = {
     ...workflow,
     stateMachine: {
@@ -2412,6 +2945,7 @@ function reconcileWorkflowToStateMachine(
     states,
     actions,
     buckets: reconciledBuckets,
+    hooks,
   };
 
   return {
@@ -2434,6 +2968,7 @@ function resetWorkflowFromStateMachine(
     states: stateMachine.states.map((state) => ({ id: state, visible: true })),
     actions: [],
     buckets: createDefaultWorkflowBuckets(stateMachine.states),
+    hooks: [],
   };
 }
 
@@ -2454,6 +2989,10 @@ function formatWorkflowSyncMessage(summary: WorkflowReconciliationSummary) {
 
   if (summary.removedBucketStateAssignments > 0) {
     updates.push("updated bucket assignments");
+  }
+
+  if (summary.removedHooks > 0) {
+    updates.push(`removed ${summary.removedHooks} stale ${pluralize("lifecycle hook", summary.removedHooks)}`);
   }
 
   if (updates.length === 0) {
@@ -2501,11 +3040,12 @@ function isImportedStateMachineDefinition(value: unknown): value is Partial<Edit
   );
 }
 
-type ImportedWorkflowDefinition = Partial<Omit<EditableWorkflowDefinition, "schemaVersion" | "states" | "actions" | "buckets">> & {
+type ImportedWorkflowDefinition = Partial<Omit<EditableWorkflowDefinition, "schemaVersion" | "states" | "actions" | "buckets" | "hooks">> & {
   schemaVersion?: string;
   states?: unknown;
   actions?: unknown;
   buckets?: unknown;
+  hooks?: unknown;
 };
 
 function normalizeImportedWorkflowDefinition(
@@ -2516,6 +3056,8 @@ function normalizeImportedWorkflowDefinition(
     ? normalizeImportedDefinition(value.embeddedStateMachineDefinition)
     : undefined;
   const effectiveStateMachine = embeddedStateMachineDefinition ?? fallbackStateMachine;
+  const actions = normalizeImportedWorkflowActions(value.actions);
+  const hooks = normalizeImportedWorkflowHooks(value.hooks, value.actions, actions);
 
   return {
     schemaVersion: normalizeImportedWorkflowSchemaVersion(value.schemaVersion),
@@ -2528,13 +3070,14 @@ function normalizeImportedWorkflowDefinition(
     },
     embeddedStateMachineDefinition,
     states: normalizeImportedWorkflowStates(value.states, effectiveStateMachine.states),
-    actions: normalizeImportedWorkflowActions(value.actions),
+    actions,
     buckets: normalizeImportedWorkflowBuckets(value.buckets),
+    hooks,
   };
 }
 
 function normalizeImportedWorkflowSchemaVersion(schemaVersion: string | undefined): typeof WORKFLOW_SCHEMA_VERSION {
-  return (schemaVersion === "0.1.0" || schemaVersion === "0.2.0" || schemaVersion === "0.3.0"
+  return (schemaVersion === "0.1.0" || schemaVersion === "0.2.0" || schemaVersion === "0.3.0" || schemaVersion === "0.4.0"
     ? WORKFLOW_SCHEMA_VERSION
     : schemaVersion ?? WORKFLOW_SCHEMA_VERSION) as typeof WORKFLOW_SCHEMA_VERSION;
 }
@@ -2566,14 +3109,6 @@ function normalizeImportedWorkflowActions(value: unknown): WorkflowAction<string
   return value.map((action) => {
     const actionRecord = action && typeof action === "object" ? (action as Record<string, unknown>) : {};
     const trigger = actionRecord.trigger === "automatic" ? "automatic" : "user";
-    const processingRecord =
-      actionRecord.processing && typeof actionRecord.processing === "object"
-        ? (actionRecord.processing as Record<string, unknown>)
-        : undefined;
-    const handlerKey =
-      processingRecord && typeof processingRecord.handlerKey === "string"
-        ? processingRecord.handlerKey.trim()
-        : "";
 
     return {
       id: typeof actionRecord.id === "string" ? actionRecord.id : "",
@@ -2582,9 +3117,86 @@ function normalizeImportedWorkflowActions(value: unknown): WorkflowAction<string
       to: typeof actionRecord.to === "string" ? actionRecord.to : "",
       trigger,
       visible: typeof actionRecord.visible === "boolean" ? actionRecord.visible : trigger === "user",
-      processing: handlerKey ? { handlerKey } : undefined,
     };
   });
+}
+
+function normalizeImportedWorkflowHooks(
+  hooksValue: unknown,
+  actionsValue: unknown,
+  actions: readonly WorkflowAction<string>[],
+): WorkflowLifecycleHook<string>[] {
+  const explicitHooks: WorkflowLifecycleHook<string>[] = Array.isArray(hooksValue)
+    ? hooksValue.map((hook, index) => {
+        const hookRecord = hook && typeof hook === "object" ? (hook as Record<string, unknown>) : {};
+        const phase = normalizeLifecyclePhase(hookRecord.phase);
+        const targetType: WorkflowLifecycleHook<string>["targetType"] =
+          hookRecord.targetType === "state" || hookRecord.targetType === "action"
+            ? hookRecord.targetType
+            : getLifecycleTargetType(phase);
+        const handlerKey = typeof hookRecord.handlerKey === "string" ? hookRecord.handlerKey.trim() : "";
+        const onSuccess = normalizeLifecycleHandler(hookRecord.onSuccess);
+        const onFailure = normalizeLifecycleHandler(hookRecord.onFailure);
+
+        return {
+          id: typeof hookRecord.id === "string" ? hookRecord.id : `hook_${index + 1}`,
+          phase,
+          targetType,
+          targetId: typeof hookRecord.targetId === "string" ? hookRecord.targetId : "",
+          handlerKey: handlerKey || undefined,
+          onSuccess,
+          onFailure,
+        };
+      })
+    : [];
+  const hookTargetKeys = new Set(
+    explicitHooks.map((hook) => `${hook.phase}:${hook.targetType}:${hook.targetId}`),
+  );
+  const legacyHooks: WorkflowLifecycleHook<string>[] = [];
+
+  if (Array.isArray(actionsValue)) {
+    actionsValue.forEach((actionValue) => {
+      const actionRecord = actionValue && typeof actionValue === "object" ? (actionValue as Record<string, unknown>) : {};
+      const actionId = typeof actionRecord.id === "string" ? actionRecord.id : "";
+      const processingRecord =
+        actionRecord.processing && typeof actionRecord.processing === "object"
+          ? (actionRecord.processing as Record<string, unknown>)
+          : undefined;
+      const handlerKey =
+        processingRecord && typeof processingRecord.handlerKey === "string"
+          ? processingRecord.handlerKey.trim()
+          : "";
+      const targetKey = `before_transition:action:${actionId}`;
+
+      if (actionId && handlerKey && actions.some((action) => action.id === actionId) && !hookTargetKeys.has(targetKey)) {
+        const hook = {
+          id: nextUniqueLifecycleHookId("before_transition", actionId, [...explicitHooks, ...legacyHooks]),
+          phase: "before_transition" as const,
+          targetType: "action" as const,
+          targetId: actionId,
+          handlerKey,
+        };
+
+        legacyHooks.push(hook);
+        hookTargetKeys.add(targetKey);
+      }
+    });
+  }
+
+  return [...explicitHooks, ...legacyHooks];
+}
+
+function normalizeLifecyclePhase(phase: unknown): WorkflowLifecyclePhase {
+  return lifecyclePhases.includes(phase as WorkflowLifecyclePhase)
+    ? (phase as WorkflowLifecyclePhase)
+    : "before_transition";
+}
+
+function normalizeLifecycleHandler(value: unknown): { handlerKey?: string } | undefined {
+  const handlerRecord = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const handlerKey = typeof handlerRecord.handlerKey === "string" ? handlerRecord.handlerKey.trim() : "";
+
+  return handlerKey ? { handlerKey } : undefined;
 }
 
 function normalizeImportedWorkflowBuckets(value: unknown): WorkflowBucket<string>[] {

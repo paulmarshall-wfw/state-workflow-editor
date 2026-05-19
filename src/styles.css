@@ -249,6 +249,10 @@ button:focus-visible {
   grid-template-columns: minmax(260px, 0.75fr) minmax(360px, 1fr) minmax(520px, 1.25fr);
 }
 
+.workflow-lifecycle-grid {
+  grid-template-columns: minmax(360px, 0.85fr) minmax(420px, 1fr) minmax(520px, 1.25fr);
+}
+
 .workflow-editor-region {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -558,7 +562,7 @@ button:focus-visible {
   display: grid;
   grid-template-areas:
     "spacer label from to action"
-    "spacer trigger visible handler handler";
+    "spacer trigger visible lifecycle lifecycle";
   grid-template-columns: 30px minmax(150px, 1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) auto;
   gap: 6px 8px;
   padding: 0 8px;
@@ -572,7 +576,7 @@ button:focus-visible {
   display: grid;
   grid-template-areas:
     "drag label from to remove"
-    "drag trigger visible handler handler";
+    "drag trigger visible lifecycle lifecycle";
   grid-template-columns: 30px minmax(150px, 1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) auto;
   gap: 8px;
   align-items: center;
@@ -611,9 +615,9 @@ button:focus-visible {
   grid-area: visible;
 }
 
-.workflow-action-header-handler,
-.workflow-action-handler-input {
-  grid-area: handler;
+.workflow-action-header-lifecycle,
+.workflow-action-lifecycle-indicator {
+  grid-area: lifecycle;
 }
 
 .workflow-action-header-action,
@@ -629,6 +633,150 @@ button:focus-visible {
 .workflow-action-row input,
 .workflow-action-row select {
   min-width: 0;
+}
+
+.workflow-action-lifecycle-indicator {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.lifecycle-badge,
+.lifecycle-empty {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifecycle-badge {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-bg);
+  padding: 4px 8px;
+}
+
+.lifecycle-empty {
+  color: var(--text-muted);
+}
+
+.lifecycle-scroll,
+.lifecycle-phase-section,
+.lifecycle-hook-list {
+  display: grid;
+  gap: 10px;
+}
+
+.empty-lifecycle,
+.lifecycle-phase-empty {
+  border: 1px dashed var(--border-subtle);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+  padding: 10px;
+}
+
+.lifecycle-phase-section {
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  padding: 8px;
+}
+
+.lifecycle-phase-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, auto);
+  gap: 8px;
+  align-items: end;
+}
+
+.lifecycle-phase-heading h3 {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.lifecycle-phase-heading span {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.lifecycle-add-control {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto;
+  gap: 8px;
+}
+
+.lifecycle-hook-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(110px, 1fr) minmax(120px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--surface-bg);
+  color: var(--text-primary);
+  padding: 8px;
+  text-align: left;
+}
+
+.lifecycle-hook-row.selected {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.lifecycle-hook-target,
+.lifecycle-hook-handler {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifecycle-hook-target {
+  font-weight: 850;
+}
+
+.lifecycle-hook-handler {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.lifecycle-editor-form {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.45fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.lifecycle-editor-form label {
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  font-weight: 850;
+}
+
+.lifecycle-preview-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-bg);
+  padding: 10px;
+}
+
+.lifecycle-preview-summary span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 850;
+  padding: 4px 8px;
 }
 
 .workflow-bucket-list,
@@ -954,15 +1102,18 @@ button:focus-visible {
     flex: 1;
   }
 
-  .state-row,
-  .transition-row,
-  .workflow-action-row,
-  .workflow-action-header,
-  .bucket-row,
-  .assignment-row,
-  .settings-form {
-    grid-template-columns: 1fr;
-  }
+	  .state-row,
+	  .transition-row,
+	  .workflow-action-row,
+	  .workflow-action-header,
+	  .bucket-row,
+	  .assignment-row,
+	  .lifecycle-phase-heading,
+	  .lifecycle-hook-row,
+	  .lifecycle-editor-form,
+	  .settings-form {
+	    grid-template-columns: 1fr;
+	  }
 
   .workflow-state-control {
     grid-template-columns: 1fr;
@@ -972,11 +1123,11 @@ button:focus-visible {
     grid-template-columns: 1fr;
   }
 
-  .workflow-view-tabs {
-    display: grid;
-    width: 100%;
-    grid-template-columns: 1fr 1fr;
-  }
+	  .workflow-view-tabs {
+	    display: grid;
+	    width: 100%;
+	    grid-template-columns: 1fr 1fr 1fr;
+	  }
 
   .workflow-view-tabs button {
     min-width: 0;

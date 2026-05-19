@@ -47,6 +47,7 @@ const workflow: WorkflowDefinition = {
     { id: "active", label: "Active", visible: true, states: ["running", "failed"] },
     { id: "finished", label: "Finished", visible: true, states: ["completed", "cancelled"] },
   ],
+  hooks: [],
 };
 
 describe("workflow definition validation", () => {
@@ -286,24 +287,67 @@ describe("workflow definition validation", () => {
     expect(hiddenBucketResult.valid).toBe(true);
   });
 
-  it("accepts valid handler keys and rejects app-specific handler names that are not string identifiers", () => {
+  it("accepts lifecycle hooks and rejects invalid handler keys", () => {
     const validResult = validateWorkflowDefinition(
       {
         ...workflow,
-        actions: [{ ...workflow.actions[0], processing: { handlerKey: "publish_photo" } }],
+        hooks: [
+          {
+            id: "start_processing",
+            phase: "before_transition",
+            targetType: "action",
+            targetId: "start",
+            handlerKey: "publish_photo",
+            onSuccess: { handlerKey: "publish_done" },
+            onFailure: { handlerKey: "publish_failed" },
+          },
+        ],
       },
       stateMachine,
     );
     const invalidResult = validateWorkflowDefinition(
       {
         ...workflow,
-        actions: [{ ...workflow.actions[0], processing: { handlerKey: "Publish Photo" } }],
+        hooks: [
+          {
+            id: "start_processing",
+            phase: "before_transition",
+            targetType: "action",
+            targetId: "start",
+            handlerKey: "Publish Photo",
+          },
+        ],
       },
       stateMachine,
     );
 
     expect(validResult.valid).toBe(true);
     expect(invalidResult.errors.map((error) => error.code)).toContain("invalid_handler_key");
+  });
+
+  it("rejects lifecycle hooks with duplicate or unknown targets", () => {
+    const result = validateWorkflowDefinition(
+      {
+        ...workflow,
+        hooks: [
+          { id: "before_start", phase: "before_transition", targetType: "action", targetId: "start" },
+          { id: "before_start_again", phase: "before_transition", targetType: "action", targetId: "start" },
+          { id: "before_missing", phase: "before_transition", targetType: "action", targetId: "missing_action" },
+          { id: "entry_missing", phase: "on_state_entry", targetType: "state", targetId: "missing_state" },
+          { id: "terminal_running", phase: "on_terminal_entry", targetType: "state", targetId: "running" },
+        ],
+      },
+      stateMachine,
+    );
+
+    expect(result.errors.map((error) => error.code)).toEqual(
+      expect.arrayContaining([
+        "duplicate_lifecycle_hook",
+        "unknown_hook_action",
+        "unknown_hook_state",
+        "non_terminal_hook_state",
+      ]),
+    );
   });
 });
 
@@ -315,5 +359,17 @@ describe("workflow runtime helpers", () => {
     expect(getActionTargetState(definedWorkflow, "complete")).toBe("completed");
     expect(definedWorkflow.bucketsByState.get("queued")?.id).toBe("waiting");
     expect(definedWorkflow.statePresentationByState.get("queued")?.visible).toBe(true);
+  });
+
+  it("indexes lifecycle hooks by phase and target", () => {
+    const definedWorkflow = defineWorkflow(
+      {
+        ...workflow,
+        hooks: [{ id: "before_start", phase: "before_transition", targetType: "action", targetId: "start" }],
+      },
+      stateMachine,
+    );
+
+    expect(definedWorkflow.hooksByTarget.get("before_transition:action:start")?.[0]?.id).toBe("before_start");
   });
 });

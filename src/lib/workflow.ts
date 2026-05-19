@@ -7,7 +7,7 @@ import {
   validateStateMachineDefinition,
 } from "./stateMachine";
 
-export const WORKFLOW_SCHEMA_VERSION = "0.4.0" as const;
+export const WORKFLOW_SCHEMA_VERSION = "0.5.0" as const;
 
 export type WorkflowSchemaVersion = typeof WORKFLOW_SCHEMA_VERSION;
 
@@ -18,10 +18,6 @@ export type WorkflowStateMachineReference = {
 
 export type WorkflowActionTrigger = "user" | "automatic";
 
-export type WorkflowActionProcessing = {
-  handlerKey: string;
-};
-
 export type WorkflowAction<State extends string = string> = {
   id: string;
   label: string;
@@ -29,7 +25,28 @@ export type WorkflowAction<State extends string = string> = {
   to: State;
   trigger: WorkflowActionTrigger;
   visible: boolean;
-  processing?: WorkflowActionProcessing;
+};
+
+export type WorkflowLifecyclePhase =
+  | "before_transition"
+  | "on_state_entry"
+  | "while_in_state"
+  | "on_terminal_entry";
+
+export type WorkflowLifecycleTargetType = "action" | "state";
+
+export type WorkflowLifecycleHandler = {
+  handlerKey?: string;
+};
+
+export type WorkflowLifecycleHook<State extends string = string> = {
+  id: string;
+  phase: WorkflowLifecyclePhase;
+  targetType: WorkflowLifecycleTargetType;
+  targetId: string;
+  handlerKey?: string;
+  onSuccess?: WorkflowLifecycleHandler;
+  onFailure?: WorkflowLifecycleHandler;
 };
 
 export type WorkflowBucket<State extends string = string> = {
@@ -54,6 +71,7 @@ export type WorkflowDefinition<State extends string = string> = {
   states: readonly WorkflowStatePresentation<State>[];
   actions: readonly WorkflowAction<State>[];
   buckets: readonly WorkflowBucket<State>[];
+  hooks: readonly WorkflowLifecycleHook<State>[];
 };
 
 export type WorkflowValidationCode =
@@ -76,6 +94,13 @@ export type WorkflowValidationCode =
   | "visible_automatic_action"
   | "hidden_user_action"
   | "invalid_handler_key"
+  | "invalid_hook_id"
+  | "invalid_hook_phase"
+  | "invalid_hook_target_type"
+  | "duplicate_lifecycle_hook"
+  | "unknown_hook_action"
+  | "unknown_hook_state"
+  | "non_terminal_hook_state"
   | "duplicate_workflow_state"
   | "unknown_workflow_state"
   | "missing_workflow_state"
@@ -102,6 +127,7 @@ export type DefinedWorkflow<State extends string = string> = {
   actionTargets: ReadonlyMap<string, State>;
   bucketsByState: ReadonlyMap<State, WorkflowBucket<State>>;
   statePresentationByState: ReadonlyMap<State, WorkflowStatePresentation<State>>;
+  hooksByTarget: ReadonlyMap<string, readonly WorkflowLifecycleHook<State>[]>;
 };
 
 export class WorkflowDefinitionError extends Error {
@@ -122,6 +148,9 @@ export function validateWorkflowDefinition<State extends string>(
   const actionCounts = countValues(workflow.actions.map((action) => action.id));
   const bucketCounts = countValues(workflow.buckets.map((bucket) => bucket.id));
   const workflowStateCounts = countValues(workflow.states.map((state) => state.id));
+  const hookTargetCounts = countValues(
+    workflow.hooks.map((hook) => lifecycleHookTargetKey(hook.phase, hook.targetType, hook.targetId)),
+  );
   const embeddedStateMachine = workflow.embeddedStateMachineDefinition;
   const effectiveStateMachine = embeddedStateMachine ?? stateMachineDefinition;
 
@@ -306,14 +335,6 @@ export function validateWorkflowDefinition<State extends string>(
       });
     }
 
-    if (action.processing?.handlerKey && !isValidWorkflowId(action.processing.handlerKey)) {
-      errors.push({
-        code: "invalid_handler_key",
-        message: `Action "${action.id}" processing handler key must use lowercase letters, numbers, and underscores.`,
-        path: `actions.${index}.processing.handlerKey`,
-      });
-    }
-
     if (!machine?.states.has(action.from) || !machine.states.has(action.to)) {
       errors.push({
         code: "unknown_action_state",
@@ -372,6 +393,76 @@ export function validateWorkflowDefinition<State extends string>(
     });
   });
 
+  const actionIds = new Set(workflow.actions.map((action) => action.id));
+
+  for (const [hookTarget, count] of hookTargetCounts) {
+    if (count > 1) {
+      errors.push({
+        code: "duplicate_lifecycle_hook",
+        message: `Lifecycle hook target "${hookTarget}" is defined more than once.`,
+        path: "hooks",
+      });
+    }
+  }
+
+  workflow.hooks.forEach((hook, index) => {
+    if (!isValidWorkflowId(hook.id)) {
+      errors.push({
+        code: "invalid_hook_id",
+        message: `Lifecycle hook "${hook.id}" must be a lowercase string literal using letters, numbers, and underscores.`,
+        path: `hooks.${index}.id`,
+      });
+    }
+
+    if (!isValidLifecyclePhase(hook.phase)) {
+      errors.push({
+        code: "invalid_hook_phase",
+        message: `Lifecycle hook "${hook.id || index + 1}" has an unsupported phase.`,
+        path: `hooks.${index}.phase`,
+      });
+    }
+
+    if (hook.targetType !== "action" && hook.targetType !== "state") {
+      errors.push({
+        code: "invalid_hook_target_type",
+        message: `Lifecycle hook "${hook.id || index + 1}" must target an action or state.`,
+        path: `hooks.${index}.targetType`,
+      });
+    }
+
+    validateHandlerKey(hook.handlerKey, `hooks.${index}.handlerKey`, hook.id, errors);
+    validateHandlerKey(hook.onSuccess?.handlerKey, `hooks.${index}.onSuccess.handlerKey`, hook.id, errors);
+    validateHandlerKey(hook.onFailure?.handlerKey, `hooks.${index}.onFailure.handlerKey`, hook.id, errors);
+
+    if (hook.phase === "before_transition") {
+      if (hook.targetType !== "action" || !actionIds.has(hook.targetId)) {
+        errors.push({
+          code: "unknown_hook_action",
+          message: `Before-transition hook "${hook.id || index + 1}" must reference an existing workflow action.`,
+          path: `hooks.${index}.targetId`,
+        });
+      }
+      return;
+    }
+
+    if (hook.targetType !== "state" || !machine?.states.has(hook.targetId as State)) {
+      errors.push({
+        code: "unknown_hook_state",
+        message: `Lifecycle hook "${hook.id || index + 1}" must reference an existing state.`,
+        path: `hooks.${index}.targetId`,
+      });
+      return;
+    }
+
+    if (hook.phase === "on_terminal_entry" && !isTerminalState(machine, hook.targetId as State)) {
+      errors.push({
+        code: "non_terminal_hook_state",
+        message: `Terminal-entry hook "${hook.id || index + 1}" must reference a terminal state.`,
+        path: `hooks.${index}.targetId`,
+      });
+    }
+  });
+
   return {
     valid: errors.length === 0,
     errors,
@@ -405,6 +496,7 @@ export function defineWorkflow<State extends string>(
   const actionTargets = new Map<string, State>();
   const bucketsByState = new Map<State, WorkflowBucket<State>>();
   const statePresentationByState = new Map<State, WorkflowStatePresentation<State>>();
+  const hooksByTarget = new Map<string, WorkflowLifecycleHook<State>[]>();
 
   for (const state of stateMachine.definition.states) {
     actionsByState.set(state, []);
@@ -427,6 +519,14 @@ export function defineWorkflow<State extends string>(
     statePresentationByState.set(state.id, { ...state });
   }
 
+  for (const hook of workflow.hooks) {
+    const targetKey = lifecycleHookTargetKey(hook.phase, hook.targetType, hook.targetId);
+    const hooks = hooksByTarget.get(targetKey) ?? [];
+
+    hooks.push(copyLifecycleHook(hook));
+    hooksByTarget.set(targetKey, hooks);
+  }
+
   return {
     definition: {
       schemaVersion: workflow.schemaVersion,
@@ -445,12 +545,14 @@ export function defineWorkflow<State extends string>(
       states: workflow.states.map((state) => ({ ...state })),
       actions: workflow.actions.map(copyAction),
       buckets: workflow.buckets.map((bucket) => ({ ...bucket, states: [...bucket.states] })),
+      hooks: workflow.hooks.map(copyLifecycleHook),
     },
     stateMachine,
     actionsByState,
     actionTargets,
     bucketsByState,
     statePresentationByState,
+    hooksByTarget,
   };
 }
 
@@ -489,12 +591,47 @@ function countValues(values: readonly string[]): Map<string, number> {
 function copyAction<State extends string>(action: WorkflowAction<State>): WorkflowAction<State> {
   return {
     ...action,
-    processing: action.processing ? { ...action.processing } : undefined,
+  };
+}
+
+function copyLifecycleHook<State extends string>(hook: WorkflowLifecycleHook<State>): WorkflowLifecycleHook<State> {
+  return {
+    ...hook,
+    onSuccess: hook.onSuccess ? { ...hook.onSuccess } : undefined,
+    onFailure: hook.onFailure ? { ...hook.onFailure } : undefined,
   };
 }
 
 function isValidWorkflowId(actionId: string): boolean {
   return /^[a-z][a-z0-9_]*$/.test(actionId);
+}
+
+function isValidLifecyclePhase(phase: string): phase is WorkflowLifecyclePhase {
+  return (
+    phase === "before_transition" ||
+    phase === "on_state_entry" ||
+    phase === "while_in_state" ||
+    phase === "on_terminal_entry"
+  );
+}
+
+function lifecycleHookTargetKey(phase: string, targetType: string, targetId: string): string {
+  return `${phase}:${targetType}:${targetId}`;
+}
+
+function validateHandlerKey(
+  handlerKey: string | undefined,
+  path: string,
+  hookId: string,
+  errors: WorkflowValidationError[],
+) {
+  if (handlerKey && !isValidWorkflowId(handlerKey)) {
+    errors.push({
+      code: "invalid_handler_key",
+      message: `Lifecycle hook "${hookId || path}" handler key must use lowercase letters, numbers, and underscores.`,
+      path,
+    });
+  }
 }
 
 function isValidWorkflowVersion(version: string): boolean {
