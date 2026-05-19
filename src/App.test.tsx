@@ -164,7 +164,7 @@ describe("App", () => {
 
     expect(screen.getByRole("heading", { name: "State Workflow Editor" })).toBeInTheDocument();
     expect(screen.queryByText("State Machine Core")).not.toBeInTheDocument();
-    expect(screen.getByText("v1.0.2")).toBeInTheDocument();
+    expect(screen.getByText("v1.0.3")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Switch to dark mode" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "State Machine" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Workflow" })).toBeInTheDocument();
@@ -1069,18 +1069,45 @@ describe("App", () => {
 
   it("adds and edits workflow lifecycle hooks with handler validation", async () => {
     const user = userEvent.setup();
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const showSaveFilePicker = vi.fn().mockResolvedValue({
+      createWritable: vi.fn().mockResolvedValue({ write, close }),
+    });
+
+    (
+      window as Window & {
+        showSaveFilePicker?: typeof showSaveFilePicker;
+      }
+    ).showSaveFilePicker = showSaveFilePicker;
+
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Workflow" }));
     await user.click(screen.getByRole("button", { name: "Lifecycle" }));
 
-    expect(screen.getByText("No lifecycle hooks for this workflow.")).toBeInTheDocument();
+    expect(screen.queryByText("No lifecycle hooks for this workflow.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No hooks")).not.toBeInTheDocument();
+
+    const beforeTransitionSection = screen.getByLabelText("Before Transition target").closest("section") as HTMLElement;
+    const beforeTransitionTarget = screen.getByLabelText("Before Transition target") as HTMLSelectElement;
+
+    expect(Array.from(beforeTransitionTarget.options).map((option) => option.textContent)).toEqual([
+      "start",
+      "complete",
+      "fail",
+      "retry",
+      "cancel_queued",
+      "cancel_running",
+    ]);
 
     await user.selectOptions(screen.getByLabelText("Before Transition target"), "start");
-    await user.click(within(screen.getByRole("list", { name: "Before Transition hooks" }).closest("section") as HTMLElement).getByRole("button", { name: "Add Hook" }));
+    await user.click(within(beforeTransitionSection).getByRole("button", { name: "Add Hook" }));
 
     expect(screen.getByLabelText("Phase")).toHaveValue("Before Transition");
     expect(screen.getByLabelText("Target")).toHaveValue("start");
+    expect(screen.getByRole("button", { name: /start No main handler Valid/ })).toBeInTheDocument();
+    expect(screen.queryByText("Start (start)")).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Main Handler Key"), "run_start");
     await user.type(screen.getByLabelText("Success Handler Key"), "start_ok");
@@ -1096,6 +1123,28 @@ describe("App", () => {
     await user.type(screen.getByLabelText("Failure Handler Key"), "start_failed");
 
     expect(screen.getByRole("button", { name: "Export Workflow" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Export Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Export Bundled Workflow" }));
+
+    expect(write).toHaveBeenCalledTimes(2);
+    const linkedExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
+    const bundledExport = JSON.parse(await readBlobText(write.mock.calls[1][0] as Blob));
+    const expectedHooks = [
+      {
+        id: "before_transition_start",
+        phase: "before_transition",
+        targetType: "action",
+        targetId: "start",
+        handlerKey: "run_start",
+        onSuccess: { handlerKey: "start_ok" },
+        onFailure: { handlerKey: "start_failed" },
+      },
+    ];
+
+    expect(linkedExport.hooks).toEqual(expectedHooks);
+    expect(bundledExport.hooks).toEqual(expectedHooks);
+    expect(bundledExport.embeddedStateMachineDefinition.id).toBe("scan_job_state");
 
     await user.click(screen.getByRole("button", { name: "Actions" }));
 

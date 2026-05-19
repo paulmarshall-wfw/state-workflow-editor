@@ -1849,7 +1849,6 @@ function WorkflowLifecycleList({
         <span className="schema-version">{hooks.length}</span>
       </div>
       <div className="column-scroll lifecycle-scroll">
-        {hooks.length === 0 ? <div className="empty-lifecycle">No lifecycle hooks for this workflow.</div> : null}
         {lifecyclePhases.map((phase) => {
           const phaseHooks = hooks.filter((hook) => hook.phase === phase);
           const availableTargets = getAvailableLifecycleTargetOptions(phase, hooks, actions, states, terminalStates);
@@ -1859,8 +1858,10 @@ function WorkflowLifecycleList({
             <section key={phase} className="lifecycle-phase-section">
               <div className="lifecycle-phase-heading">
                 <div>
-                  <h3>{lifecyclePhaseLabels[phase]}</h3>
-                  <span>{phaseHooks.length}</span>
+                  <h3>
+                    {lifecyclePhaseLabels[phase]}
+                    <span>{phaseHooks.length}</span>
+                  </h3>
                 </div>
                 <div className="lifecycle-add-control">
                   <select
@@ -1891,11 +1892,9 @@ function WorkflowLifecycleList({
                   </button>
                 </div>
               </div>
-              <div className="lifecycle-hook-list" role="list" aria-label={`${lifecyclePhaseLabels[phase]} hooks`}>
-                {phaseHooks.length === 0 ? (
-                  <div className="lifecycle-phase-empty">No hooks</div>
-                ) : (
-                  phaseHooks.map((hook) => {
+              {phaseHooks.length > 0 ? (
+                <div className="lifecycle-hook-list" role="list" aria-label={`${lifecyclePhaseLabels[phase]} hooks`}>
+                  {phaseHooks.map((hook) => {
                     const hasIssue = isLifecycleHookInvalid(hook, hooks, actions, states, terminalStates);
 
                     return (
@@ -1912,9 +1911,9 @@ function WorkflowLifecycleList({
                         <span className={hasIssue ? "status error" : "status ok"}>{hasIssue ? "Issue" : "Valid"}</span>
                       </button>
                     );
-                  })
-                )}
-              </div>
+                  })}
+                </div>
+              ) : null}
             </section>
           );
         })}
@@ -2515,22 +2514,7 @@ function MermaidGraph({
       aria-label={workflow ? "Workflow Mermaid preview" : "State machine Mermaid preview"}
     >
       {svg ? (
-        <>
-          <div className="mermaid-preview-svg" dangerouslySetInnerHTML={{ __html: svg }} />
-          {workflow && workflow.hooks.length > 0 ? (
-            <div className="lifecycle-preview-summary">
-              {lifecyclePhases.map((phase) => {
-                const count = workflow.hooks.filter((hook) => hook.phase === phase).length;
-
-                return count > 0 ? (
-                  <span key={phase}>
-                    {lifecyclePhaseLabels[phase]}: {count}
-                  </span>
-                ) : null;
-              })}
-            </div>
-          ) : null}
-        </>
+        <div className="mermaid-preview-svg" dangerouslySetInnerHTML={{ __html: svg }} />
       ) : (
         <div className="empty-graph">Rendering preview...</div>
       )}
@@ -2722,7 +2706,7 @@ function getLifecycleTargetOptions(
   terminalStates: readonly string[],
 ) {
   if (phase === "before_transition") {
-    return actions.map((action) => ({ id: action.id, label: action.label || action.id }));
+    return actions.map((action) => ({ id: action.id, label: action.id }));
   }
 
   const targetStates = phase === "on_terminal_entry" ? terminalStates : states;
@@ -2754,7 +2738,7 @@ function formatLifecycleTargetLabel(hook: WorkflowLifecycleHook<string>, actions
   if (hook.targetType === "action") {
     const action = actions.find((candidate) => candidate.id === hook.targetId);
 
-    return action ? `${action.label || action.id} (${action.id})` : hook.targetId;
+    return action?.id ?? hook.targetId;
   }
 
   return hook.targetId;

@@ -664,38 +664,39 @@ button:focus-visible {
 }
 
 .lifecycle-scroll,
-.lifecycle-phase-section,
 .lifecycle-hook-list {
   display: grid;
-  gap: 10px;
+  gap: 6px;
 }
 
-.empty-lifecycle,
-.lifecycle-phase-empty {
-  border: 1px dashed var(--border-subtle);
-  border-radius: 7px;
-  background: var(--surface-muted);
-  color: var(--text-muted);
-  font-size: 0.84rem;
-  font-weight: 800;
-  padding: 10px;
+.lifecycle-scroll {
+  align-content: start;
+  grid-auto-rows: max-content;
+  overflow: auto;
 }
 
 .lifecycle-phase-section {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 6px;
+  align-content: start;
   border: 1px solid var(--border-subtle);
   border-radius: 7px;
   background: var(--surface-muted);
-  padding: 8px;
+  padding: 6px;
 }
 
 .lifecycle-phase-heading {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, auto);
-  gap: 8px;
-  align-items: end;
+  gap: 6px;
+  align-items: start;
 }
 
 .lifecycle-phase-heading h3 {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
   margin: 0;
   font-size: 0.88rem;
 }
@@ -709,20 +710,29 @@ button:focus-visible {
 .lifecycle-add-control {
   display: grid;
   grid-template-columns: minmax(120px, 1fr) auto;
-  gap: 8px;
+  gap: 6px;
+  align-items: start;
+}
+
+.lifecycle-add-control select,
+.lifecycle-add-control button {
+  height: 32px;
 }
 
 .lifecycle-hook-row {
   display: grid;
   width: 100%;
   grid-template-columns: minmax(110px, 1fr) minmax(120px, 1fr) auto;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   border: 1px solid var(--border-subtle);
   border-radius: 7px;
   background: var(--surface-bg);
   color: var(--text-primary);
-  padding: 8px;
+  box-sizing: border-box;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 8px;
   text-align: left;
 }
 
@@ -759,24 +769,6 @@ button:focus-visible {
   color: var(--text-secondary);
   font-size: 0.84rem;
   font-weight: 850;
-}
-
-.lifecycle-preview-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--surface-bg);
-  padding: 10px;
-}
-
-.lifecycle-preview-summary span {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-secondary);
-  font-size: 0.78rem;
-  font-weight: 850;
-  padding: 4px 8px;
 }
 
 .workflow-bucket-list,
@@ -1109,7 +1101,6 @@ button:focus-visible {
 	  .bucket-row,
 	  .assignment-row,
 	  .lifecycle-phase-heading,
-	  .lifecycle-hook-row,
 	  .lifecycle-editor-form,
 	  .settings-form {
 	    grid-template-columns: 1fr;

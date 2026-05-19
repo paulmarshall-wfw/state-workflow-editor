@@ -6,12 +6,12 @@ The state-machine layer is deliberately narrow. It owns valid states, allowed st
 
 ## Status
 
-- Version: `1.0.2`
+- Version: `1.0.3`
 - Runtime: TypeScript, React, Vite, Mermaid
 - Storage: local file import/export only; exports use the File System Access API when supported and browser download fallback otherwise
 - App selection: Target App fields can be filled from a local folder picker when the browser supports directory selection
 - App settings: logo URL and light/dark theme are stored in browser local storage
-- Release state: private `1.0.2` project checkpoint, not published
+- Release state: private `1.0.3` project checkpoint, not published
 
 ## Development
 
@@ -31,10 +31,13 @@ npm run verify
 - `src/lib/`: reusable project-agnostic state-machine and workflow contract helpers
 - `src/App.tsx`: browser editor for authoring state-machine and workflow definitions
 - `src/styles.css`: editor styling
+- `docs/json-file-formats.md`: current import/export JSON file-format reference
 - `docs/plans/`: approved planning artifacts
 - `.github/workflows/verify.yml`: CI verification baseline
 
 ## State-Machine Definition Format
+
+The dedicated format reference is [docs/json-file-formats.md](docs/json-file-formats.md). This README keeps a shorter working example.
 
 ```json
 {
@@ -64,6 +67,8 @@ For example: `example-project-0.1.0-state-specification.json`.
 The editor prefers slug-like Target App values such as `state-workflow-engine`. The folder picker reads `package.json` from the selected project folder first, using `name` and stripping package scopes such as `@scope/state-workflow-engine` to `state-workflow-engine`. If no suitable package name exists, it uses the selected folder name when already slug-like, then a slug-like `.app-dashboard.json` `name`, then a conservative slug conversion of the folder name. Folder paths and handles are not stored or exported.
 
 ## Workflow Definition Format
+
+The current linked and bundled workflow JSON contracts are defined in [docs/json-file-formats.md](docs/json-file-formats.md).
 
 Workflow definitions keep their own `id` and `workflowVersion` separate. The linked state-machine identity is the pair `stateMachine.id` plus `stateMachine.definitionVersion`.
 
@@ -177,7 +182,7 @@ Failure handling, retries, logging, authorization, idempotency, persistence, job
 - The app has State Machine, Workflow, and Settings pages.
 - The Target App control includes a folder picker that updates both state-machine and workflow app names.
 - The State Machine page uses three independently scrolling columns: states, selected-state transitions, and a read-only Mermaid preview.
-- The Workflow page has Actions, Buckets, and Lifecycle views. Actions maps named action-button labels onto legal state-machine transitions and lets users set trigger mode and user visibility. Buckets lets users edit bucket names directly, toggle bucket visibility, add states to the selected bucket from an all-state dropdown, toggle workflow-level state visibility, and remove states from the selected bucket. Lifecycle lets users add app-specific handler keys for before-transition, state-entry, while-in-state, and terminal-entry phases, with optional success and failure handler keys. All workflow views retain the action-labelled Mermaid preview; in Buckets view, the selected bucket's states use solid boundaries while all other states use dotted boundaries, and workflows with lifecycle hooks show a compact hook summary in the preview panel.
+- The Workflow page has Actions, Buckets, and Lifecycle views. Actions maps named action-button labels onto legal state-machine transitions and lets users set trigger mode and user visibility. Buckets lets users edit bucket names directly, toggle bucket visibility, add states to the selected bucket from an all-state dropdown, toggle workflow-level state visibility, and remove states from the selected bucket. Lifecycle lets users add app-specific handler keys for before-transition, state-entry, while-in-state, and terminal-entry phases, with optional success and failure handler keys. All workflow views retain the action-labelled Mermaid preview; in Buckets view, the selected bucket's states use solid boundaries while all other states use dotted boundaries.
 
 ## Core API
 
