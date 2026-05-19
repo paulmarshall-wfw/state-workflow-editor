@@ -297,6 +297,20 @@ describe("App", () => {
     expect(screen.queryByLabelText("Transition 1 target")).not.toBeInTheDocument();
   });
 
+  it("selects a state from the drag grip or row background", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Drag running" }));
+
+    expect(screen.getByRole("listitem", { name: "running state row" })).toHaveClass("selected");
+
+    await user.click(screen.getByRole("listitem", { name: "completed state row" }));
+
+    expect(screen.getByRole("listitem", { name: "completed state row" })).toHaveClass("selected");
+    expect(screen.getByRole("listitem", { name: "running state row" })).not.toHaveClass("selected");
+  });
+
   it("shows validation errors and disables export for terminal outgoing transitions", async () => {
     const user = userEvent.setup();
     render(<App />);

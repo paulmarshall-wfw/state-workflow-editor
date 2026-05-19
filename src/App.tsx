@@ -1,4 +1,4 @@
-import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import packageJson from "../package.json";
 import {
   STATE_MACHINE_SCHEMA_VERSION,
@@ -1525,6 +1525,12 @@ function StateList({
     setDropTargetIndex(null);
   }
 
+  function selectFromRowBackground(event: MouseEvent<HTMLElement>, state: string) {
+    if (event.target === event.currentTarget) {
+      onSelect(state);
+    }
+  }
+
   return (
     <div className="state-list" role="list" aria-label="State list">
       {states.map((state, index) => {
@@ -1545,6 +1551,7 @@ function StateList({
             className={rowClasses}
             role="listitem"
             aria-label={`${rowLabel} state row`}
+            onClick={(event) => selectFromRowBackground(event, state)}
             onDragOver={(event) => showDropTarget(event, index)}
             onDragEnter={(event) => showDropTarget(event, index)}
             onDrop={(event) => dropState(event, index)}
@@ -1553,6 +1560,7 @@ function StateList({
               type="button"
               className="state-drag-handle"
               draggable
+              onClick={() => onSelect(state)}
               onDragStart={(event) => beginDrag(event, index)}
               onDragEnd={endDrag}
               aria-label={`Drag ${rowLabel}`}
