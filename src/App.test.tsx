@@ -375,7 +375,7 @@ describe("App", () => {
 
     expect(screen.getByRole("heading", { name: "State Workflow Editor" })).toBeInTheDocument();
     expect(screen.queryByText("State Machine Core")).not.toBeInTheDocument();
-    expect(screen.getByText("v1.0.4")).toBeInTheDocument();
+    expect(screen.getByText("v1.0.5")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Switch to dark mode" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "State Machine" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Workflow" })).toBeInTheDocument();

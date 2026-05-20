@@ -1,0 +1,81 @@
+{
+  "manifestVersion": "1.1.0",
+  "appKind": "localWebApp",
+  "appVersion": "1.0.5",
+  "appId": "state-workflow-engine",
+  "name": "State Workflow Editor",
+  "description": "Local State Workflow Editor for authoring state-machine and workflow contract definitions.",
+  "publisher": {
+    "name": "Paul Marshall"
+  },
+  "launcherCompatibility": {
+    "minLauncherVersion": "1.1.0"
+  },
+  "storage": {
+    "manifestRegistry": {
+      "logicalRoot": "applauncher.manifests",
+      "macos": "~/Library/Application Support/AppLauncher/manifests",
+      "windows": "%LOCALAPPDATA%\\AppLauncher\\manifests",
+      "linux": "~/.local/share/AppLauncher/manifests"
+    },
+    "manifestInstallSource": {
+      "logicalRoot": "applauncher.manifest-install-source",
+      "macos": "~/Library/Application Support/AppLauncher/manifest-install",
+      "windows": "%LOCALAPPDATA%\\AppLauncher\\manifest-install",
+      "linux": "~/.local/share/AppLauncher/manifest-install"
+    },
+    "manifestSync": {
+      "syncOnStartup": true,
+      "supportsManualRefresh": true,
+      "manualRefreshActionLabel": "Refresh Manifests"
+    }
+  },
+  "defaults": {
+    "preferredProfileId": "production",
+    "preferredHostPort": 5174
+  },
+  "localWebApp": {
+    "workingDirectory": "/Users/paulmarshall/Software Development/state-workflow-engine",
+    "launchCommand": {
+      "executable": "/usr/bin/env",
+      "args": [
+        "npm",
+        "run",
+        "dev"
+      ],
+      "environment": [
+        {
+          "name": "PATH",
+          "value": "/Users/paulmarshall/.nvm/versions/node/v24.14.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        }
+      ]
+    },
+    "connection": {
+      "protocol": "http",
+      "host": "127.0.0.1",
+      "port": 5174,
+      "path": "/"
+    },
+    "healthcheck": {
+      "type": "http",
+      "path": "/",
+      "port": 5174,
+      "intervalSeconds": 5,
+      "timeoutSeconds": 3
+    },
+    "open": {
+      "path": "/",
+      "preferBrowser": true
+    }
+  },
+  "profiles": [
+    {
+      "id": "production",
+      "name": "Production"
+    }
+  ],
+  "ui": {
+    "iconName": "workflow",
+    "accentColor": "#48B9C7"
+  }
+}
