@@ -1,4 +1,14 @@
-import { ChangeEvent, DragEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChangeEvent,
+  DragEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import packageJson from "../package.json";
 import {
   CURRENT_WORKSPACE_DRAFT_KEY,
@@ -91,6 +101,13 @@ type ActivePage = "state-machine" | "workflow" | "library" | "settings";
 type WorkflowEditorView = "actions" | "buckets" | "lifecycle";
 
 type MermaidPreviewTheme = AppSettings["theme"];
+
+type ActionMenuItem = {
+  label: string;
+  onSelect: () => void | Promise<void>;
+  disabled?: boolean;
+  danger?: boolean;
+};
 
 let mermaidPreviewCounter = 0;
 
@@ -1406,83 +1423,85 @@ export function App() {
             </button>
           </div>
         </div>
-        <div className="header-actions">
-          <button
-            type="button"
-            className={activePage === "state-machine" ? "secondary active" : "secondary"}
-            onClick={() => setActivePage("state-machine")}
-          >
-            State Machine
-          </button>
-          <button
-            type="button"
-            className={activePage === "workflow" ? "secondary active" : "secondary"}
-            onClick={() => setActivePage("workflow")}
-          >
-            Workflow
-          </button>
-          <button
-            type="button"
-            className={activePage === "library" ? "secondary active" : "secondary"}
-            onClick={() => setActivePage("library")}
-          >
-            Library
-          </button>
-          <button
-            type="button"
-            className={activePage === "settings" ? "secondary active" : "secondary"}
-            onClick={() => setActivePage("settings")}
-          >
-            Settings
-          </button>
-          <input
-            ref={stateMachineFileInputRef}
-            className="hidden-input"
-            type="file"
-            accept="application/json,.json"
-            onChange={importStateMachineDefinition}
-            aria-label="Import state machine JSON definition"
-          />
-          <input
-            ref={workflowFileInputRef}
-            className="hidden-input"
-            type="file"
-            accept="application/json,.json"
-            onChange={importWorkflowDefinition}
-            aria-label="Import workflow JSON definition"
-          />
-          {activePage === "state-machine" ? (
-            <>
-              <button type="button" className="secondary" onClick={() => stateMachineFileInputRef.current?.click()}>
-                Import State Machine
-              </button>
-              <button type="button" className="secondary" onClick={saveCurrentStateMachineToLibrary} disabled={!validation.valid}>
-                Save State Machine
-              </button>
-              <button type="button" onClick={exportStateMachineDefinition} disabled={!validation.valid}>
-                Export State Machine
-              </button>
-            </>
-          ) : null}
-          {activePage === "workflow" ? (
-            <>
-              <button type="button" className="secondary" onClick={() => workflowFileInputRef.current?.click()}>
-                Import Workflow
-              </button>
-              <button type="button" className="secondary danger" onClick={resetWorkflow}>
-                Reset Workflow
-              </button>
-              <button type="button" className="secondary" onClick={saveCurrentWorkflowToLibrary} disabled={!workflowValidation.valid}>
-                Save Workflow
-              </button>
-              <button type="button" onClick={() => exportWorkflowDefinition(false)} disabled={!workflowValidation.valid}>
-                Export Workflow
-              </button>
-              <button type="button" onClick={() => exportWorkflowDefinition(true)} disabled={!workflowValidation.valid}>
-                Export Bundled Workflow
-              </button>
-            </>
-          ) : null}
+        <div className="header-controls">
+          <nav className="page-tabs" aria-label="Editor pages">
+            <button
+              type="button"
+              className={activePage === "state-machine" ? "page-tab active" : "page-tab"}
+              aria-current={activePage === "state-machine" ? "page" : undefined}
+              onClick={() => setActivePage("state-machine")}
+            >
+              State Machine
+            </button>
+            <button
+              type="button"
+              className={activePage === "workflow" ? "page-tab active" : "page-tab"}
+              aria-current={activePage === "workflow" ? "page" : undefined}
+              onClick={() => setActivePage("workflow")}
+            >
+              Workflow
+            </button>
+            <button
+              type="button"
+              className={activePage === "library" ? "page-tab active" : "page-tab"}
+              aria-current={activePage === "library" ? "page" : undefined}
+              onClick={() => setActivePage("library")}
+            >
+              Library
+            </button>
+            <button
+              type="button"
+              className={activePage === "settings" ? "page-tab active" : "page-tab"}
+              aria-current={activePage === "settings" ? "page" : undefined}
+              onClick={() => setActivePage("settings")}
+            >
+              Settings
+            </button>
+          </nav>
+          <div className="page-actions">
+            <input
+              ref={stateMachineFileInputRef}
+              className="hidden-input"
+              type="file"
+              accept="application/json,.json"
+              onChange={importStateMachineDefinition}
+              aria-label="Import state machine JSON definition"
+            />
+            <input
+              ref={workflowFileInputRef}
+              className="hidden-input"
+              type="file"
+              accept="application/json,.json"
+              onChange={importWorkflowDefinition}
+              aria-label="Import workflow JSON definition"
+            />
+            {activePage === "state-machine" ? (
+              <ActionMenu
+                label="State Machine Actions"
+                items={[
+                  { label: "Import State Machine", onSelect: () => stateMachineFileInputRef.current?.click() },
+                  { label: "Save State Machine", onSelect: saveCurrentStateMachineToLibrary, disabled: !validation.valid },
+                  { label: "Export State Machine", onSelect: exportStateMachineDefinition, disabled: !validation.valid },
+                ]}
+              />
+            ) : null}
+            {activePage === "workflow" ? (
+              <ActionMenu
+                label="Workflow Actions"
+                items={[
+                  { label: "Import Workflow", onSelect: () => workflowFileInputRef.current?.click() },
+                  { label: "Reset Workflow", onSelect: resetWorkflow, danger: true },
+                  { label: "Save Workflow", onSelect: saveCurrentWorkflowToLibrary, disabled: !workflowValidation.valid },
+                  { label: "Export Workflow", onSelect: () => exportWorkflowDefinition(false), disabled: !workflowValidation.valid },
+                  {
+                    label: "Export Bundled Workflow",
+                    onSelect: () => exportWorkflowDefinition(true),
+                    disabled: !workflowValidation.valid,
+                  },
+                ]}
+              />
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -2106,6 +2125,76 @@ function LibraryPage({
         </section>
       </section>
     </section>
+  );
+}
+
+function ActionMenu({ label, items }: { label: string; items: ActionMenuItem[] }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function closeOnPointerDown(event: globalThis.MouseEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", closeOnPointerDown);
+
+    return () => document.removeEventListener("mousedown", closeOnPointerDown);
+  }, [isOpen]);
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    }
+  }
+
+  function selectItem(item: ActionMenuItem) {
+    if (item.disabled) {
+      return;
+    }
+
+    setIsOpen(false);
+    void item.onSelect();
+  }
+
+  return (
+    <div className="action-menu" ref={menuRef} onKeyDown={handleKeyDown}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="action-menu-trigger"
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((current) => !current)}
+      >
+        {label}
+        <span aria-hidden="true">▾</span>
+      </button>
+      {isOpen ? (
+        <div className="action-menu-list" role="menu" aria-label={label}>
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              className={item.danger ? "danger" : undefined}
+              disabled={item.disabled}
+              onClick={() => selectItem(item)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

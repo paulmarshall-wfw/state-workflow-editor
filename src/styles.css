@@ -148,15 +148,16 @@ button:focus-visible {
 }
 
 .app-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto minmax(220px, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
 }
 
 .brand-lockup {
   display: flex;
   align-items: center;
+  justify-self: start;
   min-width: 0;
   gap: 12px;
 }
@@ -209,11 +210,91 @@ button:focus-visible {
   font-weight: 900;
 }
 
-.header-actions {
+.header-controls {
+  display: contents;
+}
+
+.page-tabs {
+  display: inline-flex;
+  grid-column: 2;
+  justify-self: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-muted);
+}
+
+.page-tab {
+  min-height: 34px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.page-tab:last-child {
+  border-right: 0;
+}
+
+.page-tab.active {
+  background: var(--surface-bg);
+  color: var(--accent-strong);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.page-actions {
   display: flex;
-  flex-wrap: wrap;
+  grid-column: 3;
   justify-content: flex-end;
+  justify-self: end;
+}
+
+.action-menu {
+  position: relative;
+}
+
+.action-menu-trigger {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
+}
+
+.action-menu-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  width: max-content;
+  min-width: 220px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-bg);
+  box-shadow: var(--shadow);
+}
+
+.action-menu-list button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 34px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.action-menu-list button:hover:not(:disabled),
+.action-menu-list button:focus-visible {
+  border-color: var(--border);
+  background: var(--surface-muted);
+}
+
+.action-menu-list button.danger {
+  color: var(--error-text);
 }
 
 .fixed-control-grid {
@@ -1193,6 +1274,7 @@ button:focus-visible {
   }
 
   .app-header {
+    display: flex;
     align-items: flex-start;
     flex-direction: column;
   }
@@ -1203,13 +1285,36 @@ button:focus-visible {
     gap: 2px;
   }
 
-  .header-actions {
+  .header-controls {
+    display: flex;
+    flex-wrap: wrap;
     width: 100%;
     justify-content: stretch;
   }
 
-  .header-actions button {
-    flex: 1;
+  .page-tabs {
+    display: grid;
+    flex: 1 1 100%;
+    justify-self: stretch;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .page-tab {
+    min-width: 0;
+    padding: 0 8px;
+  }
+
+  .page-actions,
+  .action-menu,
+  .action-menu-trigger {
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .action-menu-list {
+    right: auto;
+    left: 0;
+    width: 100%;
   }
 
 	  .state-row,
