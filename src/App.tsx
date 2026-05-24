@@ -40,6 +40,7 @@ type EditableWorkflowDefinition = WorkflowDefinition<string>;
 type AppSettings = {
   logoUrl: string;
   theme: "light" | "dark";
+  diagramDirection: DiagramDirection;
 };
 
 type FileSystemWritable = {
@@ -101,6 +102,7 @@ type ActivePage = "state-machine" | "workflow" | "library" | "settings";
 type WorkflowEditorView = "actions" | "buckets" | "lifecycle";
 
 type MermaidPreviewTheme = AppSettings["theme"];
+type DiagramDirection = "vertical" | "horizontal";
 
 type ActionMenuItem = {
   label: string;
@@ -172,6 +174,7 @@ const appSettingsStorageKey = "state-workflow-editor-settings";
 const defaultSettings: AppSettings = {
   logoUrl: "",
   theme: "light",
+  diagramDirection: "vertical",
 };
 
 export function App() {
@@ -1245,6 +1248,10 @@ export function App() {
     updateSettings({ ...settings, theme: settings.theme === "light" ? "dark" : "light" });
   }
 
+  function updateDiagramDirection(diagramDirection: DiagramDirection) {
+    updateSettings({ ...settings, diagramDirection });
+  }
+
   function updateSettings(nextSettings: AppSettings) {
     setSettings(nextSettings);
     localStorage.setItem(appSettingsStorageKey, JSON.stringify(nextSettings));
@@ -1649,13 +1656,23 @@ export function App() {
             </section>
 
             <section className="panel column-panel graph-panel">
-              <div className="panel-heading">
+              <div className="panel-heading preview-heading">
                 <h2>Preview</h2>
-                <span className="schema-version">schema v{definition.schemaVersion}</span>
+                <div className="preview-heading-actions">
+                  <DiagramDirectionToggle
+                    diagramDirection={settings.diagramDirection}
+                    onDiagramDirectionChange={updateDiagramDirection}
+                  />
+                  <span className="schema-version">schema v{definition.schemaVersion}</span>
+                </div>
               </div>
               <div className="column-scroll graph-scroll">
                 {machine ? (
-                  <MermaidGraph machine={machine.definition} theme={settings.theme} />
+                  <MermaidGraph
+                    machine={machine.definition}
+                    theme={settings.theme}
+                    diagramDirection={settings.diagramDirection}
+                  />
                 ) : (
                   <div className="empty-graph">No preview</div>
                 )}
@@ -1924,9 +1941,15 @@ export function App() {
               )}
 
               <section className="panel column-panel graph-panel workflow-preview-panel">
-                <div className="panel-heading">
+                <div className="panel-heading preview-heading">
                   <h2>Workflow Preview</h2>
-                  <span className="schema-version">schema v{linkedWorkflow.schemaVersion}</span>
+                  <div className="preview-heading-actions">
+                    <DiagramDirectionToggle
+                      diagramDirection={settings.diagramDirection}
+                      onDiagramDirectionChange={updateDiagramDirection}
+                    />
+                    <span className="schema-version">schema v{linkedWorkflow.schemaVersion}</span>
+                  </div>
                 </div>
                 <div className="column-scroll graph-scroll">
                   {definedWorkflow ? (
@@ -1937,6 +1960,7 @@ export function App() {
                         selectedWorkflowView === "buckets" && selectedBucket ? selectedBucketStates : undefined
                       }
                       theme={settings.theme}
+                      diagramDirection={settings.diagramDirection}
                     />
                   ) : (
                     <div className="empty-graph">No preview</div>
@@ -2309,6 +2333,35 @@ function SettingsPage({
         </div>
       </section>
     </section>
+  );
+}
+
+function DiagramDirectionToggle({
+  diagramDirection,
+  onDiagramDirectionChange,
+}: {
+  diagramDirection: DiagramDirection;
+  onDiagramDirectionChange: (diagramDirection: DiagramDirection) => void;
+}) {
+  return (
+    <div className="diagram-direction-toggle" role="group" aria-label="Diagram direction">
+      <button
+        type="button"
+        className={diagramDirection === "vertical" ? "active" : ""}
+        aria-pressed={diagramDirection === "vertical"}
+        onClick={() => onDiagramDirectionChange("vertical")}
+      >
+        Vertical
+      </button>
+      <button
+        type="button"
+        className={diagramDirection === "horizontal" ? "active" : ""}
+        aria-pressed={diagramDirection === "horizontal"}
+        onClick={() => onDiagramDirectionChange("horizontal")}
+      >
+        Horizontal
+      </button>
+    </div>
   );
 }
 
@@ -3174,11 +3227,13 @@ function MermaidGraph({
   workflow,
   workflowFocusStateIds,
   theme,
+  diagramDirection,
 }: {
   machine: EditableDefinition;
   workflow?: EditableWorkflowDefinition;
   workflowFocusStateIds?: readonly string[];
   theme: MermaidPreviewTheme;
+  diagramDirection: DiagramDirection;
 }) {
   const [svg, setSvg] = useState("");
   const [renderError, setRenderError] = useState<string | null>(null);
@@ -3186,9 +3241,9 @@ function MermaidGraph({
   const diagram = useMemo(
     () =>
       workflow
-        ? buildWorkflowMermaidDiagram(machine, workflow, theme, workflowFocusStateIds)
-        : buildMermaidDiagram(machine, theme),
-    [machine, workflow, theme, workflowFocusStateIds],
+        ? buildWorkflowMermaidDiagram(machine, workflow, theme, workflowFocusStateIds, diagramDirection)
+        : buildMermaidDiagram(machine, theme, diagramDirection),
+    [machine, workflow, theme, workflowFocusStateIds, diagramDirection],
   );
 
   if (!renderId.current) {
@@ -3957,9 +4012,13 @@ function removeEmbeddedStateMachine(workflow: EditableWorkflowDefinition): Edita
   return linkedWorkflow;
 }
 
-export function buildMermaidDiagram(machine: EditableDefinition, theme: MermaidPreviewTheme = "light"): string {
+export function buildMermaidDiagram(
+  machine: EditableDefinition,
+  theme: MermaidPreviewTheme = "light",
+  diagramDirection: DiagramDirection = "vertical",
+): string {
   const palette = getMermaidPreviewPalette(theme);
-  const lines = ["flowchart LR"];
+  const lines = [getMermaidFlowchartDeclaration(diagramDirection)];
 
   for (const state of machine.states) {
     lines.push(`  ${state}["${state}"]`);
@@ -3991,9 +4050,10 @@ export function buildWorkflowMermaidDiagram(
   workflow: EditableWorkflowDefinition,
   theme: MermaidPreviewTheme = "light",
   focusStateIds?: readonly string[],
+  diagramDirection: DiagramDirection = "vertical",
 ): string {
   const palette = getMermaidPreviewPalette(theme);
-  const lines = ["flowchart LR"];
+  const lines = [getMermaidFlowchartDeclaration(diagramDirection)];
   const isFocusedPreview = focusStateIds !== undefined;
   const focusStateSet = new Set(focusStateIds ?? []);
   const terminalStateSet = new Set(machine.terminalStates);
@@ -4061,6 +4121,10 @@ export function buildWorkflowMermaidDiagram(
 
 function escapeMermaidLabel(label: string) {
   return label.replace(/\|/g, "/");
+}
+
+function getMermaidFlowchartDeclaration(diagramDirection: DiagramDirection) {
+  return diagramDirection === "horizontal" ? "flowchart LR" : "flowchart TD";
 }
 
 function getMermaidPreviewPalette(theme: MermaidPreviewTheme) {

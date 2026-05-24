@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import mermaid from "mermaid";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App, buildMermaidDiagram, buildWorkflowMermaidDiagram } from "./App";
 
@@ -387,6 +388,8 @@ describe("App", () => {
     expect(screen.getByLabelText("State Machine Version")).toHaveValue("0.1.0");
     expect(screen.getByText("Valid")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "State machine Mermaid preview" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Vertical" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Horizontal" })).toHaveAttribute("aria-pressed", "false");
     expect(await screen.findByTestId("mock-mermaid-svg")).toBeInTheDocument();
     await expectStateMachineAction(userEvent.setup(), "Export State Machine", true);
   });
@@ -431,8 +434,10 @@ describe("App", () => {
     } as const;
     const source = buildMermaidDiagram(definition);
     const darkSource = buildMermaidDiagram(definition, "dark");
+    const horizontalSource = buildMermaidDiagram(definition, "light", "horizontal");
 
-    expect(source).toContain("flowchart LR");
+    expect(source).toContain("flowchart TD");
+    expect(horizontalSource).toContain("flowchart LR");
     expect(source).toContain("queued --> running");
     expect(source).toContain("running --> completed");
     expect(source).toContain("classDef state fill:#eef2f5");
@@ -465,8 +470,13 @@ describe("App", () => {
       buckets: [{ id: "workflow", label: "Workflow", visible: true, states: ["queued", "running"] }],
       hooks: [],
     } as const;
+    const source = buildWorkflowMermaidDiagram(definition, workflow);
+    const horizontalSource = buildWorkflowMermaidDiagram(definition, workflow, "light", undefined, "horizontal");
 
-    expect(buildWorkflowMermaidDiagram(definition, workflow)).toContain("queued -->|start| running");
+    expect(source).toContain("flowchart TD");
+    expect(source).toContain("queued -->|start| running");
+    expect(horizontalSource).toContain("flowchart LR");
+    expect(horizontalSource).toContain("queued -->|start| running");
   });
 
   it("generates focused workflow Mermaid source with dotted non-bucket states", () => {
@@ -532,6 +542,33 @@ describe("App", () => {
     });
     expect(screen.getByRole("button", { name: "Switch to light mode" })).toBeInTheDocument();
     expect(localStorage.getItem("state-workflow-editor-settings")).toContain('"theme":"dark"');
+  });
+
+  it("toggles and persists the Mermaid preview direction", async () => {
+    const user = userEvent.setup();
+    const renderMock = vi.mocked(mermaid.render);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(renderMock.mock.calls.some(([, source]) => source.includes("flowchart TD"))).toBe(true);
+    });
+
+    await user.click(screen.getByRole("button", { name: "Horizontal" }));
+
+    await waitFor(() => {
+      expect(renderMock.mock.calls.some(([, source]) => source.includes("flowchart LR"))).toBe(true);
+    });
+    expect(screen.getByRole("button", { name: "Vertical" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Horizontal" })).toHaveAttribute("aria-pressed", "true");
+    expect(localStorage.getItem("state-workflow-editor-settings")).toContain('"diagramDirection":"horizontal"');
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+
+    await waitFor(() => {
+      expect(renderMock.mock.calls.filter(([, source]) => source.includes("flowchart LR")).length).toBeGreaterThan(1);
+    });
+    expect(screen.getByRole("button", { name: "Horizontal" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("validates app name and state definition version", async () => {
