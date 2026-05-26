@@ -90,10 +90,15 @@ function createTextFile(contents: string, name: string, type = "application/json
   return file;
 }
 
-function createFakeIndexedDb(): IDBFactory {
+type FakeIndexedDbFactory = IDBFactory & {
+  database: FakeDatabase;
+};
+
+function createFakeIndexedDb(): FakeIndexedDbFactory {
   const database = new FakeDatabase();
 
   return {
+    database,
     open: () => {
       const request = new FakeOpenRequest(database);
 
@@ -106,7 +111,7 @@ function createFakeIndexedDb(): IDBFactory {
 
       return request as unknown as IDBOpenDBRequest;
     },
-  } as unknown as IDBFactory;
+  } as unknown as FakeIndexedDbFactory;
 }
 
 class FakeOpenRequest {
@@ -267,38 +272,53 @@ async function getLastRenderedMermaidSource() {
 
 type TestUser = ReturnType<typeof userEvent.setup>;
 
+function getActionMenuTrigger() {
+  const trigger = screen
+    .getAllByRole("button", { name: "Actions" })
+    .find((button) => button.classList.contains("action-menu-trigger"));
+
+  if (!trigger) {
+    throw new Error("Actions menu trigger not found.");
+  }
+
+  return trigger;
+}
+
+function getWorkflowActionsTab() {
+  const tab = screen
+    .getAllByRole("button", { name: "Actions" })
+    .find((button) => button.classList.contains("active") || button.closest(".workflow-view-tabs"));
+
+  if (!tab) {
+    throw new Error("Workflow Actions tab not found.");
+  }
+
+  return tab;
+}
+
 async function openWorkflowValidationIssues(user: TestUser) {
   await user.click(screen.getByRole("button", { name: "View Issues" }));
 
   return screen.getByRole("dialog", { name: "Workflow Validation Issues" });
 }
 
-async function openStateMachineActions(user: TestUser) {
-  await user.click(screen.getByRole("button", { name: "State Machine Actions" }));
+async function openActions(user: TestUser) {
+  await user.click(getActionMenuTrigger());
 
-  return screen.getByRole("menu", { name: "State Machine Actions" });
+  return screen.getByRole("menu", { name: "Actions" });
 }
 
-async function openWorkflowActions(user: TestUser) {
-  await user.click(screen.getByRole("button", { name: "Workflow Actions" }));
-
-  return screen.getByRole("menu", { name: "Workflow Actions" });
-}
-
-async function clickStateMachineAction(user: TestUser, name: string) {
-  const menu = await openStateMachineActions(user);
+async function clickAction(user: TestUser, name: string) {
+  const menu = await openActions(user);
 
   await user.click(within(menu).getByRole("menuitem", { name }));
 }
 
-async function clickWorkflowAction(user: TestUser, name: string) {
-  const menu = await openWorkflowActions(user);
+const clickStateMachineAction = clickAction;
+const clickWorkflowAction = clickAction;
 
-  await user.click(within(menu).getByRole("menuitem", { name }));
-}
-
-async function expectStateMachineAction(user: TestUser, name: string, enabled: boolean) {
-  const menu = await openStateMachineActions(user);
+async function expectAction(user: TestUser, name: string, enabled: boolean) {
+  const menu = await openActions(user);
   const item = within(menu).getByRole("menuitem", { name });
 
   if (enabled) {
@@ -307,26 +327,17 @@ async function expectStateMachineAction(user: TestUser, name: string, enabled: b
     expect(item).toBeDisabled();
   }
 
-  await user.click(screen.getByRole("button", { name: "State Machine Actions" }));
+  await user.click(getActionMenuTrigger());
 }
 
-async function expectWorkflowAction(user: TestUser, name: string, enabled: boolean) {
-  const menu = await openWorkflowActions(user);
-  const item = within(menu).getByRole("menuitem", { name });
-
-  if (enabled) {
-    expect(item).toBeEnabled();
-  } else {
-    expect(item).toBeDisabled();
-  }
-
-  await user.click(screen.getByRole("button", { name: "Workflow Actions" }));
-}
+const expectStateMachineAction = expectAction;
+const expectWorkflowAction = expectAction;
 
 describe("App", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    vi.useRealTimers();
     URL.createObjectURL = originalCreateObjectUrl;
     URL.revokeObjectURL = originalRevokeObjectUrl;
     if (originalShowSaveFilePicker) {
@@ -376,14 +387,16 @@ describe("App", () => {
 
     expect(screen.getByRole("heading", { name: "State Workflow Editor" })).toBeInTheDocument();
     expect(screen.queryByText("State Machine Core")).not.toBeInTheDocument();
-    expect(screen.getByText("v1.0.5")).toBeInTheDocument();
+    expect(screen.getByText("v1.0.6")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Switch to dark mode" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "State Machine" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Workflow" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Library" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "State Machine" })).toHaveClass("active");
-    expect(screen.getByRole("button", { name: "State Machine Actions" })).toBeInTheDocument();
+    expect(getActionMenuTrigger()).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "State Machine Actions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Workflow Actions" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Target App")).toHaveValue("Example Project");
     expect(screen.getByLabelText("State Machine Version")).toHaveValue("0.1.0");
     expect(screen.getByText("Valid")).toBeInTheDocument();
@@ -394,10 +407,50 @@ describe("App", () => {
     await expectStateMachineAction(userEvent.setup(), "Export State Machine", true);
   });
 
+  it("keeps one global actions menu visible across editor pages", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    for (const page of ["State Machine", "Workflow", "Library", "Settings"]) {
+      await user.click(screen.getByRole("button", { name: page }));
+
+      expect(getActionMenuTrigger()).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "State Machine Actions" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Workflow Actions" })).not.toBeInTheDocument();
+    }
+  });
+
+  it("shows the full global actions menu with expected enabled states", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const menu = await openActions(user);
+
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Import State Machine",
+      "Import Workflow",
+      "Save State Machine",
+      "Save Workflow",
+      "Save State Machine and Workflow",
+      "Reset Workflow",
+      "Export State Machine",
+      "Export Workflow",
+      "Export Bundled Workflow",
+    ]);
+    expect(within(menu).getByRole("menuitem", { name: "Save State Machine" })).toBeEnabled();
+    expect(within(menu).getByRole("menuitem", { name: "Save Workflow" })).toBeEnabled();
+    expect(within(menu).getByRole("menuitem", { name: "Save State Machine and Workflow" })).toBeEnabled();
+    expect(within(menu).getByRole("menuitem", { name: "Export State Machine" })).toBeEnabled();
+    expect(within(menu).getByRole("menuitem", { name: "Export Workflow" })).toBeEnabled();
+    expect(within(menu).getByRole("menuitem", { name: "Export Bundled Workflow" })).toBeEnabled();
+  });
+
   it("saves state-machine and workflow definitions through the Library page", async () => {
+    const fakeIndexedDb = createFakeIndexedDb();
+
     Object.defineProperty(window, "indexedDB", {
       configurable: true,
-      value: createFakeIndexedDb(),
+      value: fakeIndexedDb,
     });
     const user = userEvent.setup();
 
@@ -417,6 +470,149 @@ describe("App", () => {
     expect(screen.getByRole("list", { name: "Saved state machines" })).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Saved workflows" })).toBeInTheDocument();
     expect(screen.getByText("scan_job_workflow")).toBeInTheDocument();
+
+    const stateMachineRecord = fakeIndexedDb.database.stores
+      .get("stateMachineDefinitions")
+      ?.records.get("stateMachine:scan_job_state@0.1.0") as { savedAt: string };
+    const workflowRecord = fakeIndexedDb.database.stores
+      .get("workflowDefinitions")
+      ?.records.get("workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0") as { savedAt: string };
+    const formattedStateMachineSavedAt = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(stateMachineRecord.savedAt));
+    const formattedWorkflowSavedAt = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(workflowRecord.savedAt));
+
+    expect(screen.getByTitle(stateMachineRecord.savedAt)).toHaveTextContent(`Saved ${formattedStateMachineSavedAt}`);
+    expect(screen.getByTitle(workflowRecord.savedAt)).toHaveTextContent(`Saved ${formattedWorkflowSavedAt}`);
+  });
+
+  it("saves state-machine and workflow definitions together from the global menu", async () => {
+    const fakeIndexedDb = createFakeIndexedDb();
+    Object.defineProperty(window, "indexedDB", {
+      configurable: true,
+      value: fakeIndexedDb,
+    });
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<App />);
+
+    await clickAction(user, "Save State Machine and Workflow");
+
+    expect(confirm).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Library" }));
+    expect(
+      await screen.findByText(
+        "Saved state machine stateMachine:scan_job_state@0.1.0 and workflow workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0.",
+      ),
+    ).toBeInTheDocument();
+
+    const stateMachineStore = fakeIndexedDb.database.stores.get("stateMachineDefinitions");
+    const workflowStore = fakeIndexedDb.database.stores.get("workflowDefinitions");
+    const savedStateMachine = stateMachineStore?.records.get("stateMachine:scan_job_state@0.1.0") as {
+      definition: { id: string };
+    };
+    const savedWorkflow = workflowStore?.records.get("workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0") as {
+      definition: { id: string; embeddedStateMachineDefinition?: unknown };
+    };
+
+    expect(savedStateMachine.definition.id).toBe("scan_job_state");
+    expect(savedWorkflow.definition.id).toBe("scan_job_workflow");
+    expect(savedWorkflow.definition).not.toHaveProperty("embeddedStateMachineDefinition");
+  });
+
+  it("cancels the combined save before replacing existing library records", async () => {
+    const fakeIndexedDb = createFakeIndexedDb();
+    Object.defineProperty(window, "indexedDB", {
+      configurable: true,
+      value: fakeIndexedDb,
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Library" }));
+    await clickAction(user, "Save State Machine and Workflow");
+    await screen.findByText(
+      "Saved state machine stateMachine:scan_job_state@0.1.0 and workflow workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0.",
+    );
+
+    const stateMachineStore = fakeIndexedDb.database.stores.get("stateMachineDefinitions");
+    const workflowStore = fakeIndexedDb.database.stores.get("workflowDefinitions");
+    const stateMachineBefore = JSON.stringify(stateMachineStore?.records.get("stateMachine:scan_job_state@0.1.0"));
+    const workflowBefore = JSON.stringify(
+      workflowStore?.records.get("workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0"),
+    );
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    await clickAction(user, "Save State Machine and Workflow");
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm).toHaveBeenCalledWith(
+      "Replace existing saved state-machine or workflow records for stateMachine:scan_job_state@0.1.0 and workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0?",
+    );
+    expect(await screen.findByText("State-machine and workflow save cancelled.")).toBeInTheDocument();
+    expect(JSON.stringify(stateMachineStore?.records.get("stateMachine:scan_job_state@0.1.0"))).toBe(stateMachineBefore);
+    expect(JSON.stringify(workflowStore?.records.get("workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0"))).toBe(
+      workflowBefore,
+    );
+  });
+
+  it("replaces both records with one confirmation when combined save finds existing records", async () => {
+    const fakeIndexedDb = createFakeIndexedDb();
+    Object.defineProperty(window, "indexedDB", {
+      configurable: true,
+      value: fakeIndexedDb,
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await clickAction(user, "Save State Machine and Workflow");
+    await waitFor(() =>
+      expect(
+        fakeIndexedDb.database.stores
+          .get("workflowDefinitions")
+          ?.records.get("workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0"),
+      ).toBeDefined(),
+    );
+    await user.click(screen.getByRole("button", { name: "State Machine" }));
+    await user.clear(screen.getByLabelText("Target App"));
+    await user.type(screen.getByLabelText("Target App"), "Updated Project");
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await user.clear(screen.getByLabelText("Target App"));
+    await user.type(screen.getByLabelText("Target App"), "Updated Project");
+
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    await clickAction(user, "Save State Machine and Workflow");
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm).toHaveBeenCalledWith(
+      "Replace existing saved state-machine or workflow records for stateMachine:scan_job_state@0.1.0 and workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0?",
+    );
+    await user.click(screen.getByRole("button", { name: "Library" }));
+    expect(
+      await screen.findByText(
+        "Saved state machine stateMachine:scan_job_state@0.1.0 and workflow workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0.",
+      ),
+    ).toBeInTheDocument();
+
+    const stateMachineStore = fakeIndexedDb.database.stores.get("stateMachineDefinitions");
+    const workflowStore = fakeIndexedDb.database.stores.get("workflowDefinitions");
+    const savedStateMachine = stateMachineStore?.records.get("stateMachine:scan_job_state@0.1.0") as {
+      definition: { appName: string };
+    };
+    const savedWorkflow = workflowStore?.records.get("workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0") as {
+      definition: { appName: string };
+    };
+
+    expect(savedStateMachine.definition.appName).toBe("Updated Project");
+    expect(savedWorkflow.definition.appName).toBe("Updated Project");
   });
 
   it("generates Mermaid source with directed transitions and terminal-state styling", () => {
@@ -582,6 +778,7 @@ describe("App", () => {
     expect(screen.getByText("App name is required.")).toBeInTheDocument();
     expect(screen.getByText("State definition version must use a numbered SemVer value such as 0.1.0.")).toBeInTheDocument();
     await expectStateMachineAction(user, "Export State Machine", false);
+    await expectStateMachineAction(user, "Save State Machine and Workflow", false);
   });
 
   it("adds states and terminal states through the editor", async () => {
@@ -1110,7 +1307,7 @@ describe("App", () => {
 
     render(<App />);
 
-    const menu = await openStateMachineActions(user);
+    const menu = await openActions(user);
 
     vi.spyOn(document, "createElement").mockReturnValue(anchor);
     vi.spyOn(anchor, "click").mockImplementation(click);
@@ -1316,7 +1513,7 @@ describe("App", () => {
     await user.click(within(onStateEntrySection).getByRole("button", { name: "Add Hook" }));
     await user.type(screen.getByLabelText("Main Handler Key"), "enter_queued");
 
-    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(getWorkflowActionsTab());
     await user.click(screen.getByRole("button", { name: "Add All Actions" }));
 
     expect(confirm).toHaveBeenCalledWith(
@@ -1466,7 +1663,7 @@ describe("App", () => {
       expect(source).toContain("class completed,cancelled unfocusedTerminal;");
     });
 
-    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(getWorkflowActionsTab());
 
     await waitFor(async () => {
       const source = await getLastRenderedMermaidSource();
@@ -1508,6 +1705,7 @@ describe("App", () => {
     expect(within(await openWorkflowValidationIssues(user)).getByText(/needs a label/)).toBeInTheDocument();
     await expectWorkflowAction(user, "Export Workflow", false);
     await expectWorkflowAction(user, "Export Bundled Workflow", false);
+    await expectWorkflowAction(user, "Save State Machine and Workflow", false);
   });
 
   it("edits workflow action trigger visibility and keeps handler metadata out of actions", async () => {
@@ -1616,7 +1814,7 @@ describe("App", () => {
     expect(bundledExport.hooks).toEqual(expectedHooks);
     expect(bundledExport.embeddedStateMachineDefinition.id).toBe("scan_job_state");
 
-    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(getWorkflowActionsTab());
 
     expect(screen.getByText("Before transition")).toBeInTheDocument();
 
@@ -1624,6 +1822,114 @@ describe("App", () => {
 
     expect(screen.getByRole("button", { name: "Lifecycle" })).toHaveClass("active");
     expect(screen.getByLabelText("Main Handler Key")).toHaveValue("run_start");
+  });
+
+  it("regenerates lifecycle hook IDs when state targets change", async () => {
+    const user = userEvent.setup();
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const showSaveFilePicker = vi.fn().mockResolvedValue({
+      createWritable: vi.fn().mockResolvedValue({ write, close }),
+    });
+
+    (
+      window as Window & {
+        showSaveFilePicker?: typeof showSaveFilePicker;
+      }
+    ).showSaveFilePicker = showSaveFilePicker;
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Lifecycle" }));
+
+    const onStateEntrySection = screen.getByLabelText("On State Entry target").closest("section") as HTMLElement;
+
+    await user.selectOptions(screen.getByLabelText("On State Entry target"), "queued");
+    await user.click(within(onStateEntrySection).getByRole("button", { name: "Add Hook" }));
+    await user.selectOptions(screen.getByLabelText("Target"), "running");
+
+    await clickWorkflowAction(user, "Export Workflow");
+
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    const workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
+
+    expect(workflowExport.hooks).toEqual([
+      {
+        id: "on_state_entry_running",
+        phase: "on_state_entry",
+        targetType: "state",
+        targetId: "running",
+      },
+    ]);
+  });
+
+  it("suffixes regenerated lifecycle hook IDs when another hook already uses the target-derived ID", async () => {
+    const user = userEvent.setup();
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const showSaveFilePicker = vi.fn().mockResolvedValue({
+      createWritable: vi.fn().mockResolvedValue({ write, close }),
+    });
+    const json = JSON.stringify({
+      schemaVersion: "0.5.0",
+      appName: "Article Manager",
+      workflowVersion: "1.0.0",
+      id: "article_workflow",
+      stateMachine: { id: "scan_job_state", definitionVersion: "0.1.0" },
+      hooks: [
+        {
+          id: "on_state_entry_running",
+          phase: "while_in_state",
+          targetType: "state",
+          targetId: "queued",
+        },
+      ],
+    });
+
+    (
+      window as Window & {
+        showSaveFilePicker?: typeof showSaveFilePicker;
+      }
+    ).showSaveFilePicker = showSaveFilePicker;
+
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Import workflow JSON definition"), {
+      target: { files: [createTextFile(json, "workflow-with-hook-id-collision.json")] },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workflow ID")).toHaveValue("article_workflow");
+    });
+    await user.click(screen.getByRole("button", { name: "Lifecycle" }));
+
+    const onStateEntrySection = screen.getByLabelText("On State Entry target").closest("section") as HTMLElement;
+
+    await user.selectOptions(screen.getByLabelText("On State Entry target"), "queued");
+    await user.click(within(onStateEntrySection).getByRole("button", { name: "Add Hook" }));
+    await user.selectOptions(screen.getByLabelText("Target"), "running");
+
+    await clickWorkflowAction(user, "Export Workflow");
+
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    const workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
+
+    expect(workflowExport.hooks).toEqual([
+      {
+        id: "on_state_entry_running",
+        phase: "while_in_state",
+        targetType: "state",
+        targetId: "queued",
+      },
+      {
+        id: "on_state_entry_running_2",
+        phase: "on_state_entry",
+        targetType: "state",
+        targetId: "running",
+      },
+    ]);
   });
 
   it("keeps workflow actions valid when workflow buckets and state metadata are hidden", async () => {
@@ -1824,7 +2130,7 @@ describe("App", () => {
     expect(queryWorkflowBucketLabelValues()).toEqual([]);
     await expectWorkflowAction(user, "Export Workflow", true);
 
-    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(getWorkflowActionsTab());
 
     expect(getWorkflowActionLabelValues()).toEqual(["Start", "Cancel"]);
 
@@ -1925,7 +2231,7 @@ describe("App", () => {
     expect(screen.getByLabelText("Phase")).toHaveValue("Before Transition");
     expect(screen.getByLabelText("Target")).toHaveValue("start");
 
-    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(getWorkflowActionsTab());
 
     expect(screen.getByText("Before transition")).toBeInTheDocument();
     expect(screen.queryByLabelText("Action 1 handler key")).not.toBeInTheDocument();

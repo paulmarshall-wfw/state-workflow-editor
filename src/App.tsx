@@ -745,17 +745,36 @@ export function App() {
   }
 
   function updateLifecycleHookTarget(index: number, targetId: string) {
-    setWorkflow((current) => ({
-      ...current,
-      hooks: current.hooks.map((hook, hookIndex) =>
-        hookIndex === index
-          ? {
-              ...hook,
-              targetId,
-            }
-          : hook,
-      ),
-    }));
+    setWorkflow((current) => {
+      const currentHook = current.hooks[index];
+
+      if (!currentHook) {
+        return current;
+      }
+
+      const nextHookId = nextUniqueLifecycleHookId(
+        currentHook.phase,
+        targetId,
+        current.hooks.filter((_, candidateIndex) => candidateIndex !== index),
+      );
+
+      if (currentHook.id === selectedLifecycleHookId) {
+        setSelectedLifecycleHookId(nextHookId);
+      }
+
+      return {
+        ...current,
+        hooks: current.hooks.map((hook, hookIndex) =>
+          hookIndex === index
+            ? {
+                ...hook,
+                id: nextHookId,
+                targetId,
+              }
+            : hook,
+        ),
+      };
+    });
   }
 
   function updateLifecycleHookHandler(
@@ -1041,6 +1060,43 @@ export function App() {
       setLibraryMessage(`Saved workflow ${saved.key}.`);
     } catch (error) {
       setLibraryMessage(error instanceof Error ? error.message : "Unable to save workflow to the Library.");
+    }
+  }
+
+  async function saveCurrentStateMachineAndWorkflowToLibrary() {
+    if (!storage) {
+      setLibraryMessage("Local definition library is not available in this browser.");
+      return;
+    }
+
+    if (!validation.valid || !workflowValidation.valid) {
+      setLibraryMessage("Fix validation issues before saving the state machine and workflow to the Library.");
+      return;
+    }
+
+    try {
+      const existingStateMachine = await storage.getStateMachineDefinition(currentStateMachineKey);
+      const existingWorkflow = await storage.getWorkflowDefinition(currentWorkflowKey);
+
+      if (
+        (existingStateMachine || existingWorkflow) &&
+        !window.confirm(
+          `Replace existing saved state-machine or workflow records for ${currentStateMachineKey} and ${currentWorkflowKey}?`,
+        )
+      ) {
+        setLibraryMessage("State-machine and workflow save cancelled.");
+        return;
+      }
+
+      const savedStateMachine = await storage.saveStateMachineDefinition(definition);
+      const savedWorkflow = await storage.saveWorkflowDefinition(removeEmbeddedStateMachine(linkedWorkflow));
+
+      await refreshLibrary(savedStateMachine.key);
+      setLibraryMessage(`Saved state machine ${savedStateMachine.key} and workflow ${savedWorkflow.key}.`);
+    } catch (error) {
+      setLibraryMessage(
+        error instanceof Error ? error.message : "Unable to save state machine and workflow to the Library.",
+      );
     }
   }
 
@@ -1512,32 +1568,28 @@ export function App() {
               onChange={importWorkflowDefinition}
               aria-label="Import workflow JSON definition"
             />
-            {activePage === "state-machine" ? (
-              <ActionMenu
-                label="State Machine Actions"
-                items={[
-                  { label: "Import State Machine", onSelect: () => stateMachineFileInputRef.current?.click() },
-                  { label: "Save State Machine", onSelect: saveCurrentStateMachineToLibrary, disabled: !validation.valid },
-                  { label: "Export State Machine", onSelect: exportStateMachineDefinition, disabled: !validation.valid },
-                ]}
-              />
-            ) : null}
-            {activePage === "workflow" ? (
-              <ActionMenu
-                label="Workflow Actions"
-                items={[
-                  { label: "Import Workflow", onSelect: () => workflowFileInputRef.current?.click() },
-                  { label: "Reset Workflow", onSelect: resetWorkflow, danger: true },
-                  { label: "Save Workflow", onSelect: saveCurrentWorkflowToLibrary, disabled: !workflowValidation.valid },
-                  { label: "Export Workflow", onSelect: () => exportWorkflowDefinition(false), disabled: !workflowValidation.valid },
-                  {
-                    label: "Export Bundled Workflow",
-                    onSelect: () => exportWorkflowDefinition(true),
-                    disabled: !workflowValidation.valid,
-                  },
-                ]}
-              />
-            ) : null}
+            <ActionMenu
+              label="Actions"
+              items={[
+                { label: "Import State Machine", onSelect: () => stateMachineFileInputRef.current?.click() },
+                { label: "Import Workflow", onSelect: () => workflowFileInputRef.current?.click() },
+                { label: "Save State Machine", onSelect: saveCurrentStateMachineToLibrary, disabled: !validation.valid },
+                { label: "Save Workflow", onSelect: saveCurrentWorkflowToLibrary, disabled: !workflowValidation.valid },
+                {
+                  label: "Save State Machine and Workflow",
+                  onSelect: saveCurrentStateMachineAndWorkflowToLibrary,
+                  disabled: !validation.valid || !workflowValidation.valid,
+                },
+                { label: "Reset Workflow", onSelect: resetWorkflow, danger: true },
+                { label: "Export State Machine", onSelect: exportStateMachineDefinition, disabled: !validation.valid },
+                { label: "Export Workflow", onSelect: () => exportWorkflowDefinition(false), disabled: !workflowValidation.valid },
+                {
+                  label: "Export Bundled Workflow",
+                  onSelect: () => exportWorkflowDefinition(true),
+                  disabled: !workflowValidation.valid,
+                },
+              ]}
+            />
           </div>
         </div>
       </header>
@@ -2115,10 +2167,13 @@ function LibraryPage({
                         onClick={() => onSelectStateMachine(record.key)}
                         aria-pressed={selected}
                       >
-                        <span>{record.definition.id}</span>
-                        <span>{record.definition.definitionVersion}</span>
-                        <span>
+                        <span className="library-record-title">{record.definition.id}</span>
+                        <span className="library-record-version">{record.definition.definitionVersion}</span>
+                        <span className="library-record-summary">
                           {workflowCount} workflow{workflowCount === 1 ? "" : "s"}
+                        </span>
+                        <span className="library-record-saved-at" title={record.savedAt}>
+                          Saved {formatLibrarySavedAt(record.savedAt)}
                         </span>
                       </button>
                       <div className="library-row-actions">
@@ -2162,12 +2217,15 @@ function LibraryPage({
                 {selectedWorkflows.map((record) => (
                   <div key={record.key} className="library-record-row" role="listitem">
                     <div className="library-record-main static">
-                      <span>{record.definition.id}</span>
-                      <span>{record.definition.workflowVersion}</span>
-                      <span>
+                      <span className="library-record-title">{record.definition.id}</span>
+                      <span className="library-record-version">{record.definition.workflowVersion}</span>
+                      <span className="library-record-summary">
                         {record.definition.actions.length} action{record.definition.actions.length === 1 ? "" : "s"} ·{" "}
                         {record.definition.buckets.length} bucket{record.definition.buckets.length === 1 ? "" : "s"} ·{" "}
                         {record.definition.hooks.length} hook{record.definition.hooks.length === 1 ? "" : "s"}
+                      </span>
+                      <span className="library-record-saved-at" title={record.savedAt}>
+                        Saved {formatLibrarySavedAt(record.savedAt)}
                       </span>
                     </div>
                     <div className="library-row-actions">
@@ -2190,6 +2248,19 @@ function LibraryPage({
       </section>
     </section>
   );
+}
+
+function formatLibrarySavedAt(savedAt: string) {
+  const savedDate = new Date(savedAt);
+
+  if (Number.isNaN(savedDate.getTime())) {
+    return "Unknown time";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(savedDate);
 }
 
 function ActionMenu({ label, items }: { label: string; items: ActionMenuItem[] }) {

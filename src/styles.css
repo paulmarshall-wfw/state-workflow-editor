@@ -409,9 +409,10 @@ button:focus-visible {
 .library-record-main {
   display: grid;
   min-width: 0;
-  min-height: 38px;
-  grid-template-columns: minmax(120px, 1fr) minmax(74px, auto) minmax(120px, auto);
-  gap: 8px;
+  min-height: 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(96px, auto);
+  column-gap: 8px;
+  row-gap: 3px;
   align-items: center;
   border-color: transparent;
   background: transparent;
@@ -430,19 +431,25 @@ button:focus-visible {
   white-space: nowrap;
 }
 
-.library-record-main span:first-child {
+.library-record-title {
   font-weight: 900;
 }
 
-.library-record-main span:nth-child(2) {
+.library-record-version {
   color: var(--accent-strong);
   font-weight: 900;
+  text-align: right;
 }
 
-.library-record-main span:last-child {
+.library-record-summary,
+.library-record-saved-at {
   color: var(--text-muted);
   font-size: 0.82rem;
   font-weight: 850;
+}
+
+.library-record-saved-at {
+  text-align: right;
 }
 
 .library-row-actions {
