@@ -616,6 +616,36 @@ export function App() {
     });
   }
 
+  function addAllWorkflowActions() {
+    const isOverwrite = workflow.actions.length > 0;
+
+    if (
+      isOverwrite &&
+      !window.confirm("Workflow actions already exist. Add all actions will overwrite existing actions. Continue?")
+    ) {
+      return;
+    }
+
+    const actions = createWorkflowActionsFromTransitions(definition.transitions);
+    const selectedHook = workflow.hooks.find((hook) => hook.id === selectedLifecycleHookId);
+
+    setWorkflow((current) => ({
+      ...current,
+      actions,
+      hooks: isOverwrite ? current.hooks.filter((hook) => hook.targetType !== "action") : current.hooks,
+    }));
+
+    if (isOverwrite && selectedHook?.targetType === "action") {
+      setSelectedLifecycleHookId(null);
+    }
+
+    setWorkflowMessage(
+      isOverwrite
+        ? `Replaced existing workflow actions with ${actions.length} actions from state-machine transitions.`
+        : `Added ${actions.length} workflow actions from state-machine transitions.`,
+    );
+  }
+
   function updateWorkflowAction(index: number, field: "label" | "from" | "to", value: string) {
     setWorkflow((current) => ({
       ...current,
@@ -1814,14 +1844,24 @@ export function App() {
                   <div className="workflow-action-toolbar">
                     <div className="workflow-action-toolbar-row">
                       <h2>Actions</h2>
-                      <button
-                        type="button"
-                        className="secondary compact"
-                        onClick={addWorkflowAction}
-                        disabled={!selectedState || selectedStateIsTerminal || !selectedStateHasWorkflowTargets}
-                      >
-                        Add Action
-                      </button>
+                      <div className="workflow-action-button-group">
+                        <button
+                          type="button"
+                          className="secondary compact"
+                          onClick={addAllWorkflowActions}
+                          disabled={!validation.valid || definition.transitions.length === 0}
+                        >
+                          Add All Actions
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary compact"
+                          onClick={addWorkflowAction}
+                          disabled={!selectedState || selectedStateIsTerminal || !selectedStateHasWorkflowTargets}
+                        >
+                          Add Action
+                        </button>
+                      </div>
                     </div>
                     <div className="workflow-state-control">
                       <label htmlFor="workflow-selected-state">Selected State</label>
@@ -3466,6 +3506,44 @@ function uniqueBucketIdFromLabel(label: string, buckets: readonly WorkflowBucket
   return nextId;
 }
 
+function createWorkflowActionsFromTransitions(
+  transitions: EditableDefinition["transitions"],
+): WorkflowAction<string>[] {
+  const usedIds = new Set<string>();
+
+  return transitions.map((transition) => {
+    const baseId = actionIdFromLabel(`${transition.from}_to_${transition.to}`);
+    const id = uniqueGeneratedActionId(baseId, usedIds);
+
+    usedIds.add(id);
+
+    return {
+      id,
+      label: formatTransitionActionLabel(transition.from, transition.to),
+      from: transition.from,
+      to: transition.to,
+      trigger: "user",
+      visible: true,
+    };
+  });
+}
+
+function uniqueGeneratedActionId(baseId: string, usedIds: ReadonlySet<string>) {
+  if (!usedIds.has(baseId)) {
+    return baseId;
+  }
+
+  let suffix = 2;
+  let candidate = `${baseId}_${suffix}`;
+
+  while (usedIds.has(candidate)) {
+    suffix += 1;
+    candidate = `${baseId}_${suffix}`;
+  }
+
+  return candidate;
+}
+
 function actionIdFromLabel(label: string) {
   const id = label
     .trim()
@@ -3482,6 +3560,10 @@ function titleCaseAction(actionId: string) {
     .filter(Boolean)
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(" ");
+}
+
+function formatTransitionActionLabel(from: string, to: string) {
+  return `${titleCaseAction(actionIdFromLabel(from))} to ${titleCaseAction(actionIdFromLabel(to))}`;
 }
 
 function getLifecycleTargetType(phase: WorkflowLifecyclePhase) {

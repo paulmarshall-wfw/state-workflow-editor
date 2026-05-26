@@ -787,6 +787,13 @@ button:focus-visible {
   line-height: 1.1;
 }
 
+.workflow-action-button-group {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .workflow-state-control {
   grid-template-columns: 116px minmax(0, 240px);
   gap: 10px;
@@ -1377,6 +1384,14 @@ button:focus-visible {
 
   .workflow-state-control {
     grid-template-columns: 1fr;
+  }
+
+  .workflow-action-button-group {
+    justify-content: stretch;
+  }
+
+  .workflow-action-button-group button {
+    flex: 1 1 150px;
   }
 
   .validation-summary {

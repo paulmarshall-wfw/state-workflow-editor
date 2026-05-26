@@ -1157,6 +1157,198 @@ describe("App", () => {
     expect(actionInput).toHaveValue("Pause");
   });
 
+  it("shows Add All Actions beside Add Action in the workflow actions toolbar", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+
+    const buttonGroup = screen.getByRole("button", { name: "Add All Actions" }).closest(".workflow-action-button-group");
+
+    expect(buttonGroup).toContainElement(screen.getByRole("button", { name: "Add Action" }));
+    expect(Array.from(buttonGroup?.querySelectorAll("button") ?? []).map((button) => button.textContent)).toEqual([
+      "Add All Actions",
+      "Add Action",
+    ]);
+  });
+
+  it("adds workflow actions for every valid transition when no actions exist", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const showSaveFilePicker = vi.fn().mockResolvedValue({
+      createWritable: vi.fn().mockResolvedValue({ write, close }),
+    });
+
+    (
+      window as Window & {
+        showSaveFilePicker?: typeof showSaveFilePicker;
+      }
+    ).showSaveFilePicker = showSaveFilePicker;
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await clickWorkflowAction(user, "Reset Workflow");
+    await user.click(screen.getByRole("button", { name: "Add All Actions" }));
+
+    expect(confirm).not.toHaveBeenCalledWith(
+      "Workflow actions already exist. Add all actions will overwrite existing actions. Continue?",
+    );
+    expect(screen.getByText("Added 6 workflow actions from state-machine transitions.")).toBeInTheDocument();
+    expect(getWorkflowActionLabelValues()).toEqual(["Queued to Running", "Queued to Cancelled"]);
+
+    await user.selectOptions(screen.getByLabelText("Selected State"), "running");
+
+    expect(getWorkflowActionLabelValues()).toEqual([
+      "Running to Completed",
+      "Running to Failed",
+      "Running to Cancelled",
+    ]);
+
+    await user.selectOptions(screen.getByLabelText("Selected State"), "failed");
+
+    expect(getWorkflowActionLabelValues()).toEqual(["Failed to Queued"]);
+
+    await expectWorkflowAction(user, "Export Workflow", true);
+    await clickWorkflowAction(user, "Export Workflow");
+
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    const workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
+
+    expect(workflowExport.actions).toEqual([
+      {
+        id: "queued_to_running",
+        label: "Queued to Running",
+        from: "queued",
+        to: "running",
+        trigger: "user",
+        visible: true,
+      },
+      {
+        id: "running_to_completed",
+        label: "Running to Completed",
+        from: "running",
+        to: "completed",
+        trigger: "user",
+        visible: true,
+      },
+      {
+        id: "running_to_failed",
+        label: "Running to Failed",
+        from: "running",
+        to: "failed",
+        trigger: "user",
+        visible: true,
+      },
+      {
+        id: "failed_to_queued",
+        label: "Failed to Queued",
+        from: "failed",
+        to: "queued",
+        trigger: "user",
+        visible: true,
+      },
+      {
+        id: "queued_to_cancelled",
+        label: "Queued to Cancelled",
+        from: "queued",
+        to: "cancelled",
+        trigger: "user",
+        visible: true,
+      },
+      {
+        id: "running_to_cancelled",
+        label: "Running to Cancelled",
+        from: "running",
+        to: "cancelled",
+        trigger: "user",
+        visible: true,
+      },
+    ]);
+  });
+
+  it("leaves existing workflow actions unchanged when Add All Actions overwrite is cancelled", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Add All Actions" }));
+
+    expect(confirm).toHaveBeenCalledWith(
+      "Workflow actions already exist. Add all actions will overwrite existing actions. Continue?",
+    );
+    expect(getWorkflowActionLabelValues()).toEqual(["Start", "Cancel"]);
+    expect(
+      screen.queryByText("Replaced existing workflow actions with 6 actions from state-machine transitions."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("overwrites workflow actions and removes only action lifecycle hooks", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const showSaveFilePicker = vi.fn().mockResolvedValue({
+      createWritable: vi.fn().mockResolvedValue({ write, close }),
+    });
+
+    (
+      window as Window & {
+        showSaveFilePicker?: typeof showSaveFilePicker;
+      }
+    ).showSaveFilePicker = showSaveFilePicker;
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Lifecycle" }));
+
+    const beforeTransitionSection = screen.getByLabelText("Before Transition target").closest("section") as HTMLElement;
+    const onStateEntrySection = screen.getByLabelText("On State Entry target").closest("section") as HTMLElement;
+
+    await user.selectOptions(screen.getByLabelText("Before Transition target"), "start");
+    await user.click(within(beforeTransitionSection).getByRole("button", { name: "Add Hook" }));
+    await user.type(screen.getByLabelText("Main Handler Key"), "run_start");
+    await user.selectOptions(screen.getByLabelText("On State Entry target"), "queued");
+    await user.click(within(onStateEntrySection).getByRole("button", { name: "Add Hook" }));
+    await user.type(screen.getByLabelText("Main Handler Key"), "enter_queued");
+
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("button", { name: "Add All Actions" }));
+
+    expect(confirm).toHaveBeenCalledWith(
+      "Workflow actions already exist. Add all actions will overwrite existing actions. Continue?",
+    );
+    expect(screen.getByText("Replaced existing workflow actions with 6 actions from state-machine transitions.")).toBeInTheDocument();
+    expect(getWorkflowActionLabelValues()).toEqual(["Queued to Running", "Queued to Cancelled"]);
+
+    await clickWorkflowAction(user, "Export Workflow");
+
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    const workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
+
+    expect(workflowExport.actions.map((action: { id: string }) => action.id)).toEqual([
+      "queued_to_running",
+      "running_to_completed",
+      "running_to_failed",
+      "failed_to_queued",
+      "queued_to_cancelled",
+      "running_to_cancelled",
+    ]);
+    expect(workflowExport.hooks).toEqual([
+      {
+        id: "on_state_entry_queued",
+        phase: "on_state_entry",
+        targetType: "state",
+        targetId: "queued",
+        handlerKey: "enter_queued",
+      },
+    ]);
+  });
+
   it("uses the fixed workflow state selector to choose the visible action rows", async () => {
     const user = userEvent.setup();
     render(<App />);
