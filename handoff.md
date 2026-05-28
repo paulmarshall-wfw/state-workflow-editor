@@ -4,129 +4,95 @@
 
 - project name: State Workflow Editor
 - handoff type: implementation handoff
-- created timestamp in UTC: 2026-05-28T04:15:49Z
+- created timestamp in UTC: 2026-05-28T04:19:16Z
 - prepared by: Codex
 - repository, workspace, or folder: `/Users/paulmarshall/Software Development/state-workflow-engine`
 - branch or working context: `main`
-- session scope: implemented scheduled `while_in_state` lifecycle hook authoring, validation, import/export, browser-local upgrade handling, docs, and tests.
+- session scope: bumped the private project checkpoint from `1.0.6` to `1.0.7`, verified the app, and prepared a committed handoff for the clean checkpoint.
 
 ### Checkpoint Status
 
-- Git HEAD: `c37e8d9`
-- Working tree: `dirty`
+- Git HEAD: current HEAD
+- Working tree: clean
 - Dirty files intentionally in scope:
-  - `README.md`
-  - `docs/json-file-formats.md`
-  - `docs/plans/state-workflow-editor.md`
-  - `handoff.md`
-  - `src/App.test.tsx`
-  - `src/App.tsx`
-  - `src/lib/persistence.test.ts`
-  - `src/lib/workflow.test.ts`
-  - `src/lib/workflow.ts`
-  - `src/styles.css`
-- Dirty files intentionally out of scope: None
+  - None
+- Dirty files intentionally out of scope:
+  - None
 - Untracked files intentionally in scope:
-  - `docs/plans/SchedulerPlan.md`
-- Untracked files intentionally out of scope: None
+  - None
+- Untracked files intentionally out of scope:
+  - None
 - Canonical files described:
   - `AGENTS.md`
-  - `docs/plans/SchedulerPlan.md`
-  - `docs/json-file-formats.md`
+  - `package.json`
+  - `package-lock.json`
   - `README.md`
-  - `docs/plans/state-workflow-editor.md`
-  - `src/lib/workflow.ts`
-  - `src/App.tsx`
   - `src/App.test.tsx`
-  - `src/lib/workflow.test.ts`
-  - `src/lib/persistence.test.ts`
-  - `src/styles.css`
   - `handoff.md`
 - Last verification:
   - command: `npm run verify`
-  - result: `passed`
-  - timestamp UTC: 2026-05-28T04:10Z
-- Handoff freshness: `fresh-to-dirty-tree`
-- Safe-to-continue basis: this handoff describes current `HEAD` plus all dirty and untracked files from the scheduler implementation; `npm run verify` passed after the changes, and a Chrome smoke check confirmed the Lifecycle schedule controls render with schema `0.6.0`.
-- Next checkpoint action: commit or review the dirty scheduler implementation.
+  - result: passed
+  - timestamp UTC: 2026-05-28T04:19Z
+- Handoff freshness: fresh-to-HEAD
+- Safe-to-continue basis: the checkpoint is committed on `main`, the package version mirrors are `1.0.7`, `npm run verify` passed, and the handoff freshness verifier passes against the committed clean tree.
+- Next checkpoint action: verify before the next code or documentation change.
 
 ## 2. Executive Summary
 
-The current workstream implements `while_in_state` schedule authoring for workflow schema `0.6.0`. The editor remains an authoring tool only: it does not run timers, evaluate due hooks, create due-work records, execute retries, or add runtime workflow behavior.
+The current checkpoint is a private `1.0.7` project version bump for the State Workflow Editor. The prior scheduler/lifecycle-hook implementation is already committed at the parent checkpoint, and this handoff now reflects the clean committed `1.0.7` state.
 
 Complete now:
 
-- Workflow export schema is `0.6.0`.
-- `while_in_state` hooks support `schedule` metadata and optional `retryPolicy`.
-- Scheduled hooks require a valid `handlerKey`.
-- Imports preserve invalid schedule/retry objects enough for validation to report specific errors.
-- Legacy workflow schemas `0.1.0` through `0.5.0` normalize to `0.6.0` in memory.
-- Browser-local current workspace drafts and Library workflows normalize on load without requiring saved records to be rewritten immediately.
-- Lifecycle UI has schedule trigger, duration/unit, and retry controls.
-- Docs and tests are updated.
+- `package.json` and `package-lock.json` use app version `1.0.7`.
+- `README.md` reports `Version: 1.0.7` and private `1.0.7` project checkpoint status.
+- The app-level test expectation for the visible version badge is updated to `v1.0.7`.
+- `npm run verify` passed after the bump.
+- No AppLauncher manifest was generated or installed in this checkpoint; the user requested only version bump, commit, and handoff refresh.
 
 Incomplete now:
 
-- The implementation is not committed.
-- No target app normalizer has been updated in this repo.
+- No target app normalizer has been updated for workflow schema `0.6.0`.
+- No new AppLauncher manifest exists for `1.0.7`.
 
 No `project-dossier.md` exists or was needed; broader durable context remains in the repo docs.
 
 ## 3. Current Objective
 
-Immediate goal: finish and checkpoint the scheduled lifecycle-hook implementation.
+Immediate goal: continue from the clean committed `1.0.7` checkpoint.
 
-Intended finished state:
+Intended finished state: future sessions can trust the repo version, README, tests, and handoff as matching the committed checkpoint.
 
-- review the dirty diff
-- commit the scheduler implementation if accepted
-- keep workflow/runtime boundaries unchanged
-
-Definition of done: complete when the dirty scheduler files are reviewed, committed, and `git status --short` is clean.
+Definition of done: before the next checkpoint, make the requested code or doc change, run `npm run verify`, refresh `handoff.md` if continuity state changes, and commit intentionally.
 
 ## 4. Current State
 
 ### Working
 
-- Workflow schema constant is now `0.6.0`.
-- `WorkflowLifecycleHook` supports:
-  - `schedule: { trigger: "after_duration", delayMs }`
-  - `schedule: { trigger: "every_interval", intervalMs }`
-  - `retryPolicy: { maxAttempts, delayMs }`
-- `validateWorkflowDefinition` rejects:
-  - missing `while_in_state` schedule
-  - unsupported schedule trigger
-  - non-positive or non-integer schedule duration
-  - schedule on non-`while_in_state` hooks
-  - scheduled hooks without `handlerKey`
-  - invalid retry `maxAttempts` or retry `delayMs`
-- New `while_in_state` hooks default to a 15-minute `every_interval` schedule.
-- Hook Details shows schedule controls only for `while_in_state` hooks and retry controls for hooks generally.
-- File imports can load workflows with schedule-only validation issues so the author can fix them visibly in the editor.
-- Saved current drafts and saved Library workflows from older schema versions normalize to `0.6.0` when loaded.
-- Linked and bundled exports use schema `0.6.0`.
+- State-machine core remains project-agnostic.
+- Workflow schema remains `0.6.0`.
+- Lifecycle hook schedule and retry metadata authoring remains in the editor layer only.
+- Browser-local Library persistence remains separate from exported JSON contracts.
+- App version display comes from `package.json`; the visible badge test now expects `v1.0.7`.
 
 ### Partially Working
 
-- Invalid imported schedule objects are preserved for validation, but the UI can only edit them through the supported trigger/duration controls.
-- The current browser-local state in Chrome may contain pre-existing FileCatalog workflow data; this is user/browser state, not a repo fixture.
+- Existing browser-local IndexedDB state may contain older workflow records; the app normalizes older workflow schema versions on load.
 
 ### Not Working Yet
 
-- No target-app runtime behavior exists here.
-- No timer, due-work, retry execution, job orchestration, handler execution, or FileCatalog unsupported-item recheck routine exists in this repo.
+- No runtime timer, due-work, retry execution, job orchestration, handler execution, persistence, authorization, logging, or idempotency behavior exists in this repo.
+- No publish/distribution artifact was produced for `1.0.7`.
 
 ### Not Yet Verified
 
-- No new persistent screenshot artifact was captured.
-- Existing non-failing Mermaid React `act(...)` warning still appears during one App test.
-- Existing Vite Mermaid chunk-size warnings still appear during production build.
+- No browser smoke test was run for this version-only checkpoint.
+- No AppLauncher manifest validation was run because no `1.0.7` manifest was requested or created.
 
 ## 5. Active Constraints
 
 - Keep the state-machine core project-agnostic.
-- Keep workflow actions, guards, side effects, authorization, persistence, logging, jobs, retries, idempotency, and runtime orchestration out of the state-machine core.
-- The visual editor may author state-machine and workflow definitions, but it must not become the runtime workflow layer.
+- Keep workflow actions, guards, side effects, authorization, persistence, logging, jobs, retries, idempotency, and runtime orchestration out of the state-machine core unless a later approved plan changes the boundary.
+- The visual editor may author state-machine and workflow definitions, but it must not turn the state-machine layer into the workflow layer.
 - Browser-local Library persistence remains separate from exported JSON contracts.
 - `schemaVersion` is file-format version.
 - `definitionVersion` and `workflowVersion` are user-controlled definition versions and remain separate from package/app version.
@@ -152,42 +118,38 @@ Latest verification:
 npm run verify
 ```
 
-Result: passed on 2026-05-28T04:10Z. It ran TypeScript checking, 105 Vitest tests, and a Vite production build.
+Result: passed on 2026-05-28T04:19Z. It ran TypeScript checking, 105 Vitest tests, and a Vite production build.
 
 Known verification notes:
 
 - Test output still includes an existing Mermaid React `act(...)` warning, but all tests pass.
 - Build output still includes existing Mermaid chunk-size warnings.
-- Running `npm run build` can remove tracked AppLauncher manifests under `dist/applauncher-manifests/...`; those were restored after verification and are not part of the dirty diff.
-
-Chrome smoke check:
-
-- Started a temporary Vite server on `http://127.0.0.1:5180/` because the default port was occupied.
-- Confirmed in Chrome that the Lifecycle view renders schedule controls, retry controls, `schema v0.6.0`, and invalid scheduled hook issue status.
-- The temporary `5180` server was stopped.
+- Running `npm run build` cleans tracked AppLauncher manifests under `dist/applauncher-manifests/...`; restore them if they are unintentionally removed by verification and no new manifest work is in scope.
 
 Handoff verifier:
 
-- No `scripts/verify_handoff_freshness.py` exists in this repo, so no automated handoff freshness verifier was run.
+```sh
+python3 "/Users/paulmarshall/Software Development/All Skills/handoff/scripts/verify_handoff_freshness.py" handoff.md
+```
+
+Expected result after the `1.0.7` commit: `fresh-to-HEAD`.
 
 ## 7. Files to Open First
 
 - `AGENTS.md`: repo-local standards and state/workflow boundary constraints.
-- `docs/plans/SchedulerPlan.md`: implementation plan with accepted decisions folded in.
-- `src/lib/workflow.ts`: workflow schema, lifecycle schedule/retry types, and validation rules.
-- `src/App.tsx`: import normalization, Library/current draft upgrades, Lifecycle UI controls, and export behavior.
-- `src/App.test.tsx`: app-level coverage for scheduled hooks, invalid imports, and saved draft/Library upgrades.
-- `src/lib/workflow.test.ts`: workflow contract validation coverage.
+- `package.json`: app version source of truth and root scripts.
+- `README.md`: user-facing status, version, and workflow contract summary.
+- `src/App.tsx`: editor UI and package-version display.
+- `src/App.test.tsx`: app-level coverage, including version badge expectation.
 - `docs/json-file-formats.md`: canonical JSON import/export contract.
-- `README.md`: user-facing workflow contract summary.
-- `docs/plans/state-workflow-editor.md`: architectural plan updated away from handler-only `while_in_state` metadata.
+- `src/lib/workflow.ts`: workflow schema, lifecycle schedule/retry types, and validation rules.
 
 ## 8. Next Actions
 
 Next:
 
-- Review the dirty diff.
-- Commit the scheduler implementation if it is accepted.
+- Start new feature or doc work from the clean `1.0.7` checkpoint.
+- Run `npm run verify` before the next commit.
 
 Blocked:
 
@@ -196,9 +158,9 @@ Blocked:
 Later:
 
 - Update target app normalizers, such as FileCatalog, to accept workflow schema `0.6.0`.
-- Add browser screenshot artifacts only if visual regression review becomes necessary.
+- Generate and install a `1.0.7` AppLauncher manifest only if explicitly requested.
 - Address the existing Mermaid `act(...)` warning separately if desired.
 
 ## 9. Ready-Made Prompt for Starting a New Thread
 
-Read `handoff.md` as hot context. The repo is on `main` at `c37e8d9` with a dirty but verified scheduler implementation. Open `AGENTS.md`, `docs/plans/SchedulerPlan.md`, `src/lib/workflow.ts`, `src/App.tsx`, `src/App.test.tsx`, `src/lib/workflow.test.ts`, `docs/json-file-formats.md`, `README.md`, and `docs/plans/state-workflow-editor.md`. Preserve the boundary that the editor authors schedule metadata only; host apps own timers, due-work records, retries, jobs, persistence, authorization, logging, and idempotency. Run `npm run verify` before committing.
+Read `handoff.md` as hot context. The repo is on `main` at the clean committed `1.0.7` checkpoint. Open `AGENTS.md`, `package.json`, `README.md`, `src/App.tsx`, `src/App.test.tsx`, `docs/json-file-formats.md`, and `src/lib/workflow.ts`. Preserve the boundary that the editor authors workflow metadata only; host apps own timers, due-work records, retries, jobs, persistence, authorization, logging, and idempotency. Run `npm run verify` before committing.

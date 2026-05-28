@@ -6,12 +6,12 @@ The state-machine layer is deliberately narrow. It owns valid states, allowed st
 
 ## Status
 
-- Version: `1.0.6`
+- Version: `1.0.7`
 - Runtime: TypeScript, React, Vite, Mermaid
 - Storage: browser-local IndexedDB Library plus JSON import/export; exports use the File System Access API when supported and browser download fallback otherwise
 - App selection: Target App fields can be filled from a local folder picker when the browser supports directory selection
 - App settings: logo URL and light/dark theme are stored in browser local storage
-- Release state: private `1.0.6` project checkpoint, not published
+- Release state: private `1.0.7` project checkpoint, not published
 
 ## Development
 
