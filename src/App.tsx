@@ -3107,27 +3107,31 @@ function WorkflowLifecycleEditor({
             spellCheck={false}
           />
 
-          <label htmlFor="lifecycle-retry-attempts">Retry Max Attempts</label>
-          <input
-            id="lifecycle-retry-attempts"
-            type="number"
-            min="1"
-            step="1"
-            value={hook.retryPolicy?.maxAttempts ?? ""}
-            onChange={(event) => onRetryPolicyChange(hook.index, "maxAttempts", event.target.value)}
-            placeholder="empty"
-          />
+          {hook.phase === "while_in_state" ? (
+            <>
+              <label htmlFor="lifecycle-retry-attempts">Retry Max Attempts</label>
+              <input
+                id="lifecycle-retry-attempts"
+                type="number"
+                min="1"
+                step="1"
+                value={hook.retryPolicy?.maxAttempts ?? ""}
+                onChange={(event) => onRetryPolicyChange(hook.index, "maxAttempts", event.target.value)}
+                placeholder="empty"
+              />
 
-          <label htmlFor="lifecycle-retry-delay">Retry Delay Ms</label>
-          <input
-            id="lifecycle-retry-delay"
-            type="number"
-            min="0"
-            step="1"
-            value={hook.retryPolicy?.delayMs ?? ""}
-            onChange={(event) => onRetryPolicyChange(hook.index, "delayMs", event.target.value)}
-            placeholder="empty"
-          />
+              <label htmlFor="lifecycle-retry-delay">Retry Delay Ms</label>
+              <input
+                id="lifecycle-retry-delay"
+                type="number"
+                min="0"
+                step="1"
+                value={hook.retryPolicy?.delayMs ?? ""}
+                onChange={(event) => onRetryPolicyChange(hook.index, "delayMs", event.target.value)}
+                placeholder="empty"
+              />
+            </>
+          ) : null}
         </div>
       </div>
     </>
@@ -3973,11 +3977,13 @@ function isLifecycleHookInvalid(
       : !hook.schedule;
   const retryPolicy = hook.retryPolicy as Partial<WorkflowLifecycleHookRetryPolicy> | undefined;
   const hasValidRetryPolicy =
-    !retryPolicy ||
-    (Number.isInteger(retryPolicy.maxAttempts) &&
-      Number(retryPolicy.maxAttempts) > 0 &&
-      Number.isInteger(retryPolicy.delayMs) &&
-      Number(retryPolicy.delayMs) >= 0);
+    hook.phase === "while_in_state"
+      ? !retryPolicy ||
+        (Number.isInteger(retryPolicy.maxAttempts) &&
+          Number(retryPolicy.maxAttempts) > 0 &&
+          Number.isInteger(retryPolicy.delayMs) &&
+          Number(retryPolicy.delayMs) >= 0)
+      : !retryPolicy;
 
   return (
     !isWorkflowIdentifier(hook.id) ||
@@ -4285,6 +4291,7 @@ function canLoadWorkflowWithValidationIssues(errors: readonly WorkflowValidation
     "invalid_lifecycle_schedule_duration",
     "lifecycle_schedule_on_unsupported_phase",
     "missing_scheduled_handler",
+    "lifecycle_retry_on_unsupported_phase",
     "invalid_lifecycle_retry_policy",
   ]);
 

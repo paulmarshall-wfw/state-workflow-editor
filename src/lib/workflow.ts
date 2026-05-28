@@ -123,6 +123,7 @@ export type WorkflowValidationCode =
   | "invalid_lifecycle_schedule_duration"
   | "lifecycle_schedule_on_unsupported_phase"
   | "missing_scheduled_handler"
+  | "lifecycle_retry_on_unsupported_phase"
   | "invalid_lifecycle_retry_policy"
   | "duplicate_workflow_state"
   | "unknown_workflow_state"
@@ -725,6 +726,15 @@ function validateLifecycleRetryPolicy<State extends string>(
   errors: WorkflowValidationError[],
 ) {
   if (!hook.retryPolicy) {
+    return;
+  }
+
+  if (hook.phase !== "while_in_state") {
+    errors.push({
+      code: "lifecycle_retry_on_unsupported_phase",
+      message: `Lifecycle hook "${hook.id || index + 1}" can only define retry policy for while-in-state hooks.`,
+      path: `hooks.${index}.retryPolicy`,
+    });
     return;
   }
 

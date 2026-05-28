@@ -1996,6 +1996,31 @@ describe("App", () => {
     ]);
   });
 
+  it("shows retry controls only for while-in-state lifecycle hooks", async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Lifecycle" }));
+
+    const beforeTransitionSection = screen.getByLabelText("Before Transition target").closest("section") as HTMLElement;
+
+    await user.selectOptions(screen.getByLabelText("Before Transition target"), "start");
+    await user.click(within(beforeTransitionSection).getByRole("button", { name: "Add Hook" }));
+
+    expect(screen.queryByLabelText("Retry Max Attempts")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Retry Delay Ms")).not.toBeInTheDocument();
+
+    const whileInStateSection = screen.getByLabelText("While In State target").closest("section") as HTMLElement;
+
+    await user.selectOptions(screen.getByLabelText("While In State target"), "failed");
+    await user.click(within(whileInStateSection).getByRole("button", { name: "Add Hook" }));
+
+    expect(screen.getByLabelText("Retry Max Attempts")).toBeInTheDocument();
+    expect(screen.getByLabelText("Retry Delay Ms")).toBeInTheDocument();
+  });
+
   it("regenerates lifecycle hook IDs when state targets change", async () => {
     const user = userEvent.setup();
     const write = vi.fn().mockResolvedValue(undefined);

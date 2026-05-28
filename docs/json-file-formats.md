@@ -244,7 +244,7 @@ Lifecycle hooks are optional app-processing metadata. The editor validates and e
 | `targetId` | Yes | Action ID or state ID, depending on `targetType`. |
 | `handlerKey` | No | Main target-app handler key. |
 | `schedule` | For `while_in_state` only | Schedule metadata for while-in-state hooks. |
-| `retryPolicy` | No | Optional target-app retry metadata. |
+| `retryPolicy` | For `while_in_state` only | Optional target-app retry metadata for scheduled hooks. |
 | `onSuccess.handlerKey` | No | Optional target-app success handler key. |
 | `onFailure.handlerKey` | No | Optional target-app failure handler key. |
 
@@ -260,6 +260,7 @@ Supported phases:
 Hook IDs and handler keys must be lowercase snake_case identifiers. A workflow cannot define two hooks for the same `phase`, `targetType`, and `targetId`.
 
 Scheduled hooks require a valid `handlerKey`. Only `while_in_state` hooks may define `schedule`; schedules on `before_transition`, `on_state_entry`, or `on_terminal_entry` are invalid.
+Only `while_in_state` hooks may define `retryPolicy`; retry metadata on other phases is invalid.
 
 Supported schedule shapes:
 
