@@ -1025,6 +1025,12 @@ button:focus-visible {
   font-weight: 850;
 }
 
+.duration-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(110px, 0.45fr);
+  gap: 8px;
+}
+
 .workflow-bucket-list,
 .bucket-assignment-list {
   display: grid;

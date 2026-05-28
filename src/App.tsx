@@ -23,6 +23,8 @@ import {
   WorkflowDefinition,
   WorkflowLifecycleHook,
   WorkflowLifecyclePhase,
+  WorkflowLifecycleHookRetryPolicy,
+  WorkflowLifecycleHookSchedule,
   WorkflowValidationError,
   buildStateMachineDefinitionKey,
   buildWorkflowDefinitionKey,
@@ -126,6 +128,19 @@ const lifecyclePhaseLabels: Record<WorkflowLifecyclePhase, string> = {
   while_in_state: "While In State",
   on_terminal_entry: "On Terminal Entry",
 };
+
+const defaultWhileInStateSchedule: WorkflowLifecycleHookSchedule = {
+  trigger: "every_interval",
+  intervalMs: 15 * 60 * 1000,
+};
+
+const scheduleUnits = [
+  { id: "seconds", label: "Seconds", factorMs: 1000 },
+  { id: "minutes", label: "Minutes", factorMs: 60 * 1000 },
+  { id: "hours", label: "Hours", factorMs: 60 * 60 * 1000 },
+] as const;
+
+type ScheduleUnit = (typeof scheduleUnits)[number]["id"];
 
 const initialDefinition: EditableDefinition = {
   schemaVersion: STATE_MACHINE_SCHEMA_VERSION,
@@ -323,11 +338,15 @@ export function App() {
         }
 
         if (draft?.key === CURRENT_WORKSPACE_DRAFT_KEY) {
+          const draftWorkflow = normalizeImportedWorkflowDefinition(
+            draft.workflow as ImportedWorkflowDefinition,
+            draft.definition,
+          );
           setDefinition(draft.definition);
-          setWorkflow(removeEmbeddedStateMachine(draft.workflow));
+          setWorkflow(removeEmbeddedStateMachine(draftWorkflow));
           setSelectedState(draft.definition.states[0] ?? "");
-          setSelectedBucketId(draft.workflow.buckets[0]?.id ?? "");
-          setSelectedLifecycleHookId(draft.workflow.hooks[0]?.id ?? null);
+          setSelectedBucketId(draftWorkflow.buckets[0]?.id ?? "");
+          setSelectedLifecycleHookId(draftWorkflow.hooks[0]?.id ?? null);
 
           if (draft.activePage === "state-machine" || draft.activePage === "workflow" || draft.activePage === "library" || draft.activePage === "settings") {
             setActivePage(draft.activePage);
@@ -339,7 +358,7 @@ export function App() {
 
           lastDraftSignatureRef.current = buildDraftSignature(
             draft.definition,
-            removeEmbeddedStateMachine(draft.workflow),
+            removeEmbeddedStateMachine(draftWorkflow),
             draft.activePage,
             draft.selectedWorkflowView,
           );
@@ -738,6 +757,7 @@ export function App() {
           phase,
           targetType: phase === "before_transition" ? "action" : "state",
           targetId,
+          schedule: phase === "while_in_state" ? { ...defaultWhileInStateSchedule } : undefined,
         },
       ],
     }));
@@ -801,6 +821,83 @@ export function App() {
         return {
           ...hook,
           [field]: trimmedHandlerKey ? { handlerKey: trimmedHandlerKey } : undefined,
+        };
+      }),
+    }));
+  }
+
+  function updateLifecycleHookScheduleTrigger(index: number, trigger: WorkflowLifecycleHookSchedule["trigger"]) {
+    setWorkflow((current) => ({
+      ...current,
+      hooks: current.hooks.map((hook, hookIndex) => {
+        if (hookIndex !== index || hook.phase !== "while_in_state") {
+          return hook;
+        }
+
+        const durationMs = getLifecycleScheduleDurationMs(hook.schedule) ?? getLifecycleScheduleDurationMs(defaultWhileInStateSchedule) ?? 900000;
+
+        return {
+          ...hook,
+          schedule:
+            trigger === "after_duration"
+              ? { trigger, delayMs: durationMs }
+              : { trigger, intervalMs: durationMs },
+        };
+      }),
+    }));
+  }
+
+  function updateLifecycleHookScheduleDuration(index: number, amount: string, unit: ScheduleUnit) {
+    setWorkflow((current) => ({
+      ...current,
+      hooks: current.hooks.map((hook, hookIndex) => {
+        if (hookIndex !== index || hook.phase !== "while_in_state") {
+          return hook;
+        }
+
+        const unitFactor = getScheduleUnitFactorMs(unit);
+        const nextDurationMs = Number(amount) * unitFactor;
+        const trigger = getLifecycleScheduleTrigger(hook.schedule) ?? "every_interval";
+
+        return {
+          ...hook,
+          schedule:
+            trigger === "after_duration"
+              ? { trigger, delayMs: nextDurationMs }
+              : { trigger, intervalMs: nextDurationMs },
+        };
+      }),
+    }));
+  }
+
+  function updateLifecycleHookRetryPolicy(
+    index: number,
+    field: keyof WorkflowLifecycleHookRetryPolicy,
+    value: string,
+  ) {
+    setWorkflow((current) => ({
+      ...current,
+      hooks: current.hooks.map((hook, hookIndex) => {
+        if (hookIndex !== index) {
+          return hook;
+        }
+
+        const currentRetryPolicy = hook.retryPolicy as Partial<WorkflowLifecycleHookRetryPolicy> | undefined;
+        const nextRetryPolicy: Partial<WorkflowLifecycleHookRetryPolicy> = {
+          ...(currentRetryPolicy ?? {}),
+          [field]: value.trim() === "" ? undefined : Number(value),
+        };
+
+        if (nextRetryPolicy.maxAttempts === undefined && nextRetryPolicy.delayMs === undefined) {
+          return {
+            ...hook,
+            retryPolicy: undefined,
+          };
+        }
+
+        return {
+          ...hook,
+          retryPolicy: nextRetryPolicy as WorkflowLifecycleHookRetryPolicy,
         };
       }),
     }));
@@ -1158,7 +1255,11 @@ export function App() {
         return;
       }
 
-      const reconciliation = reconcileWorkflowToStateMachine(record.definition, linkedStateMachine.definition);
+      const normalizedWorkflow = normalizeImportedWorkflowDefinition(
+        record.definition as ImportedWorkflowDefinition,
+        linkedStateMachine.definition,
+      );
+      const reconciliation = reconcileWorkflowToStateMachine(normalizedWorkflow, linkedStateMachine.definition);
       const result = validateWorkflowDefinition(reconciliation.workflow, linkedStateMachine.definition);
 
       if (!result.valid) {
@@ -1246,9 +1347,18 @@ export function App() {
         return;
       }
 
-      const nextWorkflow = { ...record.definition, workflowVersion: nextVersion.trim() };
       const linkedStateMachine = await storage.getStateMachineDefinition(record.stateMachineKey);
-      const result = validateWorkflowDefinition(nextWorkflow, linkedStateMachine?.definition);
+      if (!linkedStateMachine) {
+        setLibraryMessage(`Linked state machine ${record.stateMachineKey} must be saved before this workflow can be duplicated.`);
+        return;
+      }
+
+      const normalizedWorkflow = normalizeImportedWorkflowDefinition(
+        record.definition as ImportedWorkflowDefinition,
+        linkedStateMachine.definition,
+      );
+      const nextWorkflow = { ...normalizedWorkflow, workflowVersion: nextVersion.trim() };
+      const result = validateWorkflowDefinition(nextWorkflow, linkedStateMachine.definition);
 
       if (!result.valid) {
         setLibraryMessage(`New workflow version is invalid: ${result.errors.map((error) => error.message).join(" ")}`);
@@ -1479,6 +1589,19 @@ export function App() {
       const result = validateWorkflowDefinition(reconciledWorkflow, effectiveStateMachine);
 
       if (!result.valid) {
+        if (canLoadWorkflowWithValidationIssues(result.errors)) {
+          if (nextWorkflow.embeddedStateMachineDefinition) {
+            setDefinition(nextWorkflow.embeddedStateMachineDefinition);
+            setSelectedState(nextWorkflow.embeddedStateMachineDefinition.states[0] ?? "");
+          }
+
+          setWorkflow(removeEmbeddedStateMachine(reconciledWorkflow));
+          setSelectedBucketId(reconciledWorkflow.buckets[0]?.id ?? "");
+          setSelectedLifecycleHookId(reconciledWorkflow.hooks[0]?.id ?? null);
+          setWorkflowMessage(result.errors.map((error) => error.message).join(" "));
+          return;
+        }
+
         setWorkflowMessage(result.errors.map((error) => error.message).join(" "));
         return;
       }
@@ -2026,6 +2149,9 @@ export function App() {
                       terminalStates={definition.terminalStates}
                       onTargetChange={updateLifecycleHookTarget}
                       onHandlerChange={updateLifecycleHookHandler}
+                      onScheduleTriggerChange={updateLifecycleHookScheduleTrigger}
+                      onScheduleDurationChange={updateLifecycleHookScheduleDuration}
+                      onRetryPolicyChange={updateLifecycleHookRetryPolicy}
                       onRemove={removeLifecycleHook}
                     />
                   </section>
@@ -2828,6 +2954,9 @@ function WorkflowLifecycleEditor({
   terminalStates,
   onTargetChange,
   onHandlerChange,
+  onScheduleTriggerChange,
+  onScheduleDurationChange,
+  onRetryPolicyChange,
   onRemove,
 }: {
   hook: WorkflowLifecycleHookWithIndex | null;
@@ -2841,6 +2970,9 @@ function WorkflowLifecycleEditor({
     field: "handlerKey" | "onSuccess" | "onFailure",
     handlerKey: string,
   ) => void;
+  onScheduleTriggerChange: (index: number, trigger: WorkflowLifecycleHookSchedule["trigger"]) => void;
+  onScheduleDurationChange: (index: number, amount: string, unit: ScheduleUnit) => void;
+  onRetryPolicyChange: (index: number, field: keyof WorkflowLifecycleHookRetryPolicy, value: string) => void;
   onRemove: (index: number) => void;
 }) {
   if (!hook) {
@@ -2864,6 +2996,11 @@ function WorkflowLifecycleEditor({
     terminalStates,
     hook,
   );
+  const scheduleTrigger = getLifecycleScheduleTrigger(hook.schedule);
+  const scheduleDurationMs = getLifecycleScheduleDurationMs(hook.schedule);
+  const scheduleUnit = getPreferredScheduleUnit(scheduleDurationMs);
+  const scheduleDurationAmount =
+    scheduleDurationMs === undefined ? "" : String(scheduleDurationMs / getScheduleUnitFactorMs(scheduleUnit));
 
   return (
     <>
@@ -2903,6 +3040,55 @@ function WorkflowLifecycleEditor({
             spellCheck={false}
           />
 
+          {hook.phase === "while_in_state" ? (
+            <>
+              <label htmlFor="lifecycle-schedule-trigger">Schedule Trigger</label>
+              <select
+                id="lifecycle-schedule-trigger"
+                value={scheduleTrigger ?? ""}
+                onChange={(event) =>
+                  onScheduleTriggerChange(
+                    hook.index,
+                    event.target.value as WorkflowLifecycleHookSchedule["trigger"],
+                  )
+                }
+              >
+                {scheduleTrigger ? null : (
+                  <option value="" disabled>
+                    Unsupported trigger
+                  </option>
+                )}
+                <option value="every_interval">Every Interval</option>
+                <option value="after_duration">After Duration</option>
+              </select>
+
+              <label htmlFor="lifecycle-schedule-duration">Schedule Duration</label>
+              <div className="duration-control">
+                <input
+                  id="lifecycle-schedule-duration"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={scheduleDurationAmount}
+                  onChange={(event) => onScheduleDurationChange(hook.index, event.target.value, scheduleUnit)}
+                />
+                <select
+                  aria-label="Schedule Duration Unit"
+                  value={scheduleUnit}
+                  onChange={(event) =>
+                    onScheduleDurationChange(hook.index, scheduleDurationAmount, event.target.value as ScheduleUnit)
+                  }
+                >
+                  {scheduleUnits.map((unit) => (
+                    <option key={unit.id} value={unit.id}>
+                      {unit.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          ) : null}
+
           <label htmlFor="lifecycle-success-handler">Success Handler Key</label>
           <input
             id="lifecycle-success-handler"
@@ -2919,6 +3105,28 @@ function WorkflowLifecycleEditor({
             onChange={(event) => onHandlerChange(hook.index, "onFailure", event.target.value)}
             placeholder="failure_handler"
             spellCheck={false}
+          />
+
+          <label htmlFor="lifecycle-retry-attempts">Retry Max Attempts</label>
+          <input
+            id="lifecycle-retry-attempts"
+            type="number"
+            min="1"
+            step="1"
+            value={hook.retryPolicy?.maxAttempts ?? ""}
+            onChange={(event) => onRetryPolicyChange(hook.index, "maxAttempts", event.target.value)}
+            placeholder="empty"
+          />
+
+          <label htmlFor="lifecycle-retry-delay">Retry Delay Ms</label>
+          <input
+            id="lifecycle-retry-delay"
+            type="number"
+            min="0"
+            step="1"
+            value={hook.retryPolicy?.delayMs ?? ""}
+            onChange={(event) => onRetryPolicyChange(hook.index, "delayMs", event.target.value)}
+            placeholder="empty"
           />
         </div>
       </div>
@@ -3690,6 +3898,47 @@ function isWorkflowIdentifier(value: string) {
   return /^[a-z][a-z0-9_]*$/.test(value);
 }
 
+function getLifecycleScheduleTrigger(
+  schedule: WorkflowLifecycleHook<string>["schedule"],
+): WorkflowLifecycleHookSchedule["trigger"] | undefined {
+  const trigger = (schedule as Record<string, unknown> | undefined)?.trigger;
+
+  return trigger === "after_duration" || trigger === "every_interval" ? trigger : undefined;
+}
+
+function getLifecycleScheduleDurationMs(schedule: WorkflowLifecycleHook<string>["schedule"]): number | undefined {
+  const scheduleRecord = schedule as Record<string, unknown> | undefined;
+
+  if (!scheduleRecord) {
+    return undefined;
+  }
+
+  const duration =
+    scheduleRecord.trigger === "after_duration" ? scheduleRecord.delayMs : scheduleRecord.intervalMs;
+
+  return typeof duration === "number" ? duration : undefined;
+}
+
+function getPreferredScheduleUnit(durationMs: number | undefined): ScheduleUnit {
+  if (durationMs === undefined) {
+    return "minutes";
+  }
+
+  if (durationMs % (60 * 60 * 1000) === 0) {
+    return "hours";
+  }
+
+  if (durationMs % (60 * 1000) === 0) {
+    return "minutes";
+  }
+
+  return "seconds";
+}
+
+function getScheduleUnitFactorMs(unit: ScheduleUnit) {
+  return scheduleUnits.find((candidate) => candidate.id === unit)?.factorMs ?? 60 * 1000;
+}
+
 function isLifecycleHookInvalid(
   hook: WorkflowLifecycleHook<string>,
   hooks: readonly WorkflowLifecycleHook<string>[],
@@ -3710,12 +3959,33 @@ function isLifecycleHookInvalid(
       : hook.targetType === "state" &&
         states.includes(hook.targetId) &&
         (hook.phase !== "on_terminal_entry" || terminalStates.includes(hook.targetId));
+  const scheduleTrigger = getLifecycleScheduleTrigger(hook.schedule);
+  const scheduleDurationMs = getLifecycleScheduleDurationMs(hook.schedule);
+  const hasValidSchedule =
+    hook.phase === "while_in_state"
+      ? Boolean(
+          hook.schedule &&
+            hook.handlerKey &&
+            scheduleTrigger &&
+            Number.isInteger(scheduleDurationMs) &&
+            Number(scheduleDurationMs) > 0,
+        )
+      : !hook.schedule;
+  const retryPolicy = hook.retryPolicy as Partial<WorkflowLifecycleHookRetryPolicy> | undefined;
+  const hasValidRetryPolicy =
+    !retryPolicy ||
+    (Number.isInteger(retryPolicy.maxAttempts) &&
+      Number(retryPolicy.maxAttempts) > 0 &&
+      Number.isInteger(retryPolicy.delayMs) &&
+      Number(retryPolicy.delayMs) >= 0);
 
   return (
     !isWorkflowIdentifier(hook.id) ||
     hook.targetType !== targetType ||
     !validTarget ||
     duplicateCount > 1 ||
+    !hasValidSchedule ||
+    !hasValidRetryPolicy ||
     Boolean(hook.handlerKey && !isWorkflowIdentifier(hook.handlerKey)) ||
     Boolean(hook.onSuccess?.handlerKey && !isWorkflowIdentifier(hook.onSuccess.handlerKey)) ||
     Boolean(hook.onFailure?.handlerKey && !isWorkflowIdentifier(hook.onFailure.handlerKey))
@@ -4003,9 +4273,22 @@ function normalizeImportedWorkflowDefinition(
 }
 
 function normalizeImportedWorkflowSchemaVersion(schemaVersion: string | undefined): typeof WORKFLOW_SCHEMA_VERSION {
-  return (schemaVersion === "0.1.0" || schemaVersion === "0.2.0" || schemaVersion === "0.3.0" || schemaVersion === "0.4.0"
+  return (schemaVersion === "0.1.0" || schemaVersion === "0.2.0" || schemaVersion === "0.3.0" || schemaVersion === "0.4.0" || schemaVersion === "0.5.0"
     ? WORKFLOW_SCHEMA_VERSION
     : schemaVersion ?? WORKFLOW_SCHEMA_VERSION) as typeof WORKFLOW_SCHEMA_VERSION;
+}
+
+function canLoadWorkflowWithValidationIssues(errors: readonly WorkflowValidationError[]) {
+  const loadableCodes = new Set<WorkflowValidationError["code"]>([
+    "missing_lifecycle_schedule",
+    "invalid_lifecycle_schedule_trigger",
+    "invalid_lifecycle_schedule_duration",
+    "lifecycle_schedule_on_unsupported_phase",
+    "missing_scheduled_handler",
+    "invalid_lifecycle_retry_policy",
+  ]);
+
+  return errors.length > 0 && errors.every((error) => loadableCodes.has(error.code));
 }
 
 function normalizeImportedWorkflowStates(value: unknown, states: readonly string[]) {
@@ -4063,6 +4346,8 @@ function normalizeImportedWorkflowHooks(
         const handlerKey = typeof hookRecord.handlerKey === "string" ? hookRecord.handlerKey.trim() : "";
         const onSuccess = normalizeLifecycleHandler(hookRecord.onSuccess);
         const onFailure = normalizeLifecycleHandler(hookRecord.onFailure);
+        const schedule = normalizeLifecycleSchedule(hookRecord.schedule);
+        const retryPolicy = normalizeLifecycleRetryPolicy(hookRecord.retryPolicy);
 
         return {
           id: typeof hookRecord.id === "string" ? hookRecord.id : `hook_${index + 1}`,
@@ -4070,9 +4355,11 @@ function normalizeImportedWorkflowHooks(
           targetType,
           targetId: typeof hookRecord.targetId === "string" ? hookRecord.targetId : "",
           handlerKey: handlerKey || undefined,
+          schedule,
+          retryPolicy,
           onSuccess,
           onFailure,
-        };
+        } as WorkflowLifecycleHook<string>;
       })
     : [];
   const hookTargetKeys = new Set(
@@ -4123,6 +4410,22 @@ function normalizeLifecycleHandler(value: unknown): { handlerKey?: string } | un
   const handlerKey = typeof handlerRecord.handlerKey === "string" ? handlerRecord.handlerKey.trim() : "";
 
   return handlerKey ? { handlerKey } : undefined;
+}
+
+function normalizeLifecycleSchedule(value: unknown): WorkflowLifecycleHookSchedule | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  return { ...(value as Record<string, unknown>) } as WorkflowLifecycleHookSchedule;
+}
+
+function normalizeLifecycleRetryPolicy(value: unknown): WorkflowLifecycleHookRetryPolicy | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  return { ...(value as Record<string, unknown>) } as WorkflowLifecycleHookRetryPolicy;
 }
 
 function normalizeImportedWorkflowBuckets(value: unknown): WorkflowBucket<string>[] {

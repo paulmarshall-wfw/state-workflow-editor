@@ -349,6 +349,137 @@ describe("workflow definition validation", () => {
       ]),
     );
   });
+
+  it("accepts scheduled while-in-state hooks with retry policy", () => {
+    const afterDurationResult = validateWorkflowDefinition(
+      {
+        ...workflow,
+        hooks: [
+          {
+            id: "while_running",
+            phase: "while_in_state",
+            targetType: "state",
+            targetId: "running",
+            handlerKey: "check_running",
+            schedule: { trigger: "after_duration", delayMs: 60000 },
+            retryPolicy: { maxAttempts: 3, delayMs: 1000 },
+          },
+        ],
+      },
+      stateMachine,
+    );
+    const everyIntervalResult = validateWorkflowDefinition(
+      {
+        ...workflow,
+        hooks: [
+          {
+            id: "while_failed",
+            phase: "while_in_state",
+            targetType: "state",
+            targetId: "failed",
+            handlerKey: "check_failed",
+            schedule: { trigger: "every_interval", intervalMs: 900000 },
+          },
+        ],
+      },
+      stateMachine,
+    );
+
+    expect(afterDurationResult.valid).toBe(true);
+    expect(everyIntervalResult.valid).toBe(true);
+  });
+
+  it("rejects invalid lifecycle schedules and retry policies", () => {
+    const result = validateWorkflowDefinition(
+      {
+        ...workflow,
+        hooks: [
+          {
+            id: "while_running",
+            phase: "while_in_state",
+            targetType: "state",
+            targetId: "running",
+          },
+          {
+            id: "while_failed",
+            phase: "while_in_state",
+            targetType: "state",
+            targetId: "failed",
+            handlerKey: "check_failed",
+            schedule: { trigger: "every_interval", intervalMs: 0 },
+          },
+          {
+            id: "while_queued",
+            phase: "while_in_state",
+            targetType: "state",
+            targetId: "queued",
+            handlerKey: "check_queued",
+            schedule: { trigger: "every_interval", intervalMs: 1.5 },
+            retryPolicy: { maxAttempts: 0, delayMs: -1 },
+          },
+          {
+            id: "while_cancelled",
+            phase: "while_in_state",
+            targetType: "state",
+            targetId: "cancelled",
+            handlerKey: "check_cancelled",
+            schedule: { trigger: "every_minute", intervalMs: 60000 },
+          } as unknown as WorkflowDefinition["hooks"][number],
+          {
+            id: "while_completed",
+            phase: "while_in_state",
+            targetType: "state",
+            targetId: "completed",
+            schedule: { trigger: "after_duration", delayMs: 60000 },
+          },
+          {
+            id: "entry_running",
+            phase: "on_state_entry",
+            targetType: "state",
+            targetId: "running",
+            schedule: { trigger: "after_duration", delayMs: 60000 },
+          },
+        ],
+      },
+      stateMachine,
+    );
+
+    expect(result.errors.map((error) => error.code)).toEqual(
+      expect.arrayContaining([
+        "missing_lifecycle_schedule",
+        "missing_scheduled_handler",
+        "invalid_lifecycle_schedule_trigger",
+        "invalid_lifecycle_schedule_duration",
+        "invalid_lifecycle_retry_policy",
+        "lifecycle_schedule_on_unsupported_phase",
+      ]),
+    );
+  });
+
+  it("preserves copied schedule and retry policy data when defining workflows", () => {
+    const definedWorkflow = defineWorkflow(
+      {
+        ...workflow,
+        hooks: [
+          {
+            id: "while_running",
+            phase: "while_in_state",
+            targetType: "state",
+            targetId: "running",
+            handlerKey: "check_running",
+            schedule: { trigger: "every_interval", intervalMs: 900000 },
+            retryPolicy: { maxAttempts: 3, delayMs: 60000 },
+          },
+        ],
+      },
+      stateMachine,
+    );
+    const hook = definedWorkflow.definition.hooks[0];
+
+    expect(hook.schedule).toEqual({ trigger: "every_interval", intervalMs: 900000 });
+    expect(hook.retryPolicy).toEqual({ maxAttempts: 3, delayMs: 60000 });
+    expect(hook.schedule).not.toBe(workflow.hooks[0]?.schedule);
+  });
 });
 
 describe("workflow runtime helpers", () => {

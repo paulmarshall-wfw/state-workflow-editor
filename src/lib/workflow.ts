@@ -7,7 +7,7 @@ import {
   validateStateMachineDefinition,
 } from "./stateMachine";
 
-export const WORKFLOW_SCHEMA_VERSION = "0.5.0" as const;
+export const WORKFLOW_SCHEMA_VERSION = "0.6.0" as const;
 
 export type WorkflowSchemaVersion = typeof WORKFLOW_SCHEMA_VERSION;
 
@@ -39,12 +39,29 @@ export type WorkflowLifecycleHandler = {
   handlerKey?: string;
 };
 
+export type WorkflowLifecycleHookSchedule =
+  | {
+      trigger: "after_duration";
+      delayMs: number;
+    }
+  | {
+      trigger: "every_interval";
+      intervalMs: number;
+    };
+
+export type WorkflowLifecycleHookRetryPolicy = {
+  maxAttempts: number;
+  delayMs: number;
+};
+
 export type WorkflowLifecycleHook<State extends string = string> = {
   id: string;
   phase: WorkflowLifecyclePhase;
   targetType: WorkflowLifecycleTargetType;
   targetId: string;
   handlerKey?: string;
+  schedule?: WorkflowLifecycleHookSchedule;
+  retryPolicy?: WorkflowLifecycleHookRetryPolicy;
   onSuccess?: WorkflowLifecycleHandler;
   onFailure?: WorkflowLifecycleHandler;
 };
@@ -101,6 +118,12 @@ export type WorkflowValidationCode =
   | "unknown_hook_action"
   | "unknown_hook_state"
   | "non_terminal_hook_state"
+  | "missing_lifecycle_schedule"
+  | "invalid_lifecycle_schedule_trigger"
+  | "invalid_lifecycle_schedule_duration"
+  | "lifecycle_schedule_on_unsupported_phase"
+  | "missing_scheduled_handler"
+  | "invalid_lifecycle_retry_policy"
   | "duplicate_workflow_state"
   | "unknown_workflow_state"
   | "missing_workflow_state"
@@ -433,6 +456,8 @@ export function validateWorkflowDefinition<State extends string>(
     validateHandlerKey(hook.handlerKey, `hooks.${index}.handlerKey`, hook.id, errors);
     validateHandlerKey(hook.onSuccess?.handlerKey, `hooks.${index}.onSuccess.handlerKey`, hook.id, errors);
     validateHandlerKey(hook.onFailure?.handlerKey, `hooks.${index}.onFailure.handlerKey`, hook.id, errors);
+    validateLifecycleSchedule(hook, index, errors);
+    validateLifecycleRetryPolicy(hook, index, errors);
 
     if (hook.phase === "before_transition") {
       if (hook.targetType !== "action" || !actionIds.has(hook.targetId)) {
@@ -597,6 +622,8 @@ function copyAction<State extends string>(action: WorkflowAction<State>): Workfl
 function copyLifecycleHook<State extends string>(hook: WorkflowLifecycleHook<State>): WorkflowLifecycleHook<State> {
   return {
     ...hook,
+    schedule: hook.schedule ? { ...hook.schedule } : undefined,
+    retryPolicy: hook.retryPolicy ? { ...hook.retryPolicy } : undefined,
     onSuccess: hook.onSuccess ? { ...hook.onSuccess } : undefined,
     onFailure: hook.onFailure ? { ...hook.onFailure } : undefined,
   };
@@ -630,6 +657,92 @@ function validateHandlerKey(
       code: "invalid_handler_key",
       message: `Lifecycle hook "${hookId || path}" handler key must use lowercase letters, numbers, and underscores.`,
       path,
+    });
+  }
+}
+
+function validateLifecycleSchedule<State extends string>(
+  hook: WorkflowLifecycleHook<State>,
+  index: number,
+  errors: WorkflowValidationError[],
+) {
+  const schedule = hook.schedule;
+
+  if (hook.phase !== "while_in_state") {
+    if (schedule) {
+      errors.push({
+        code: "lifecycle_schedule_on_unsupported_phase",
+        message: `Lifecycle hook "${hook.id || index + 1}" can only define a schedule for while-in-state hooks.`,
+        path: `hooks.${index}.schedule`,
+      });
+    }
+    return;
+  }
+
+  if (!schedule) {
+    errors.push({
+      code: "missing_lifecycle_schedule",
+      message: `While-in-state hook "${hook.id || index + 1}" must define a schedule.`,
+      path: `hooks.${index}.schedule`,
+    });
+    return;
+  }
+
+  if (!hook.handlerKey) {
+    errors.push({
+      code: "missing_scheduled_handler",
+      message: `Scheduled lifecycle hook "${hook.id || index + 1}" must define a handler key.`,
+      path: `hooks.${index}.handlerKey`,
+    });
+  }
+
+  const scheduleRecord = schedule as Record<string, unknown>;
+
+  if (scheduleRecord.trigger !== "after_duration" && scheduleRecord.trigger !== "every_interval") {
+    errors.push({
+      code: "invalid_lifecycle_schedule_trigger",
+      message: `Lifecycle hook "${hook.id || index + 1}" schedule trigger must be after_duration or every_interval.`,
+      path: `hooks.${index}.schedule.trigger`,
+    });
+    return;
+  }
+
+  const durationPath = scheduleRecord.trigger === "after_duration" ? "delayMs" : "intervalMs";
+  const durationValue = scheduleRecord[durationPath];
+
+  if (!Number.isInteger(durationValue) || Number(durationValue) <= 0) {
+    errors.push({
+      code: "invalid_lifecycle_schedule_duration",
+      message: `Lifecycle hook "${hook.id || index + 1}" schedule ${durationPath} must be a positive integer.`,
+      path: `hooks.${index}.schedule.${durationPath}`,
+    });
+  }
+}
+
+function validateLifecycleRetryPolicy<State extends string>(
+  hook: WorkflowLifecycleHook<State>,
+  index: number,
+  errors: WorkflowValidationError[],
+) {
+  if (!hook.retryPolicy) {
+    return;
+  }
+
+  const retryPolicy = hook.retryPolicy as Record<string, unknown>;
+
+  if (!Number.isInteger(retryPolicy.maxAttempts) || Number(retryPolicy.maxAttempts) <= 0) {
+    errors.push({
+      code: "invalid_lifecycle_retry_policy",
+      message: `Lifecycle hook "${hook.id || index + 1}" retry maxAttempts must be a positive integer.`,
+      path: `hooks.${index}.retryPolicy.maxAttempts`,
+    });
+  }
+
+  if (!Number.isInteger(retryPolicy.delayMs) || Number(retryPolicy.delayMs) < 0) {
+    errors.push({
+      code: "invalid_lifecycle_retry_policy",
+      message: `Lifecycle hook "${hook.id || index + 1}" retry delayMs must be a non-negative integer.`,
+      path: `hooks.${index}.retryPolicy.delayMs`,
     });
   }
 }

@@ -5,8 +5,8 @@ This document defines the JSON files imported and exported by State Workflow Edi
 Current exported file-format versions:
 
 - State-machine definition: `schemaVersion: "0.2.0"`
-- Workflow definition: `schemaVersion: "0.5.0"`
-- Bundled workflow definition: `schemaVersion: "0.5.0"` plus `embeddedStateMachineDefinition`
+- Workflow definition: `schemaVersion: "0.6.0"`
+- Bundled workflow definition: `schemaVersion: "0.6.0"` plus `embeddedStateMachineDefinition`
 
 `schemaVersion` is the file-format version. `definitionVersion` and `workflowVersion` are user-controlled SemVer values for the authored definitions. They are separate from the app/package version in `package.json`.
 
@@ -79,7 +79,7 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
 
 ```json
 {
-  "schemaVersion": "0.5.0",
+  "schemaVersion": "0.6.0",
   "appName": "Example App",
   "workflowVersion": "0.1.0",
   "id": "scan_job_workflow",
@@ -142,6 +142,15 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
       "targetType": "state",
       "targetId": "running",
       "handlerKey": "run_scan"
+    },
+    {
+      "id": "while_in_state_failed",
+      "phase": "while_in_state",
+      "targetType": "state",
+      "targetId": "failed",
+      "handlerKey": "recheck_failed",
+      "schedule": { "trigger": "every_interval", "intervalMs": 900000 },
+      "retryPolicy": { "maxAttempts": 3, "delayMs": 60000 }
     }
   ]
 }
@@ -151,7 +160,7 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `schemaVersion` | Yes | Must be `"0.5.0"` for current exports. |
+| `schemaVersion` | Yes | Must be `"0.6.0"` for current exports. |
 | `appName` | Yes | Human-facing target app/project name. |
 | `workflowVersion` | Yes | User-controlled SemVer for this workflow definition. |
 | `id` | Yes | Stable workflow definition ID. |
@@ -213,7 +222,7 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
 
 ### Lifecycle Hooks
 
-Lifecycle hooks are optional app-processing metadata. The editor validates and exports them, but does not execute handlers.
+Lifecycle hooks are optional app-processing metadata. The editor validates and exports them, but does not execute handlers, timers, retries, jobs, or due-work records. Host apps own runtime evaluation.
 
 ```json
 {
@@ -234,6 +243,8 @@ Lifecycle hooks are optional app-processing metadata. The editor validates and e
 | `targetType` | Yes | `"action"` for `before_transition`; `"state"` for state lifecycle phases. |
 | `targetId` | Yes | Action ID or state ID, depending on `targetType`. |
 | `handlerKey` | No | Main target-app handler key. |
+| `schedule` | For `while_in_state` only | Schedule metadata for while-in-state hooks. |
+| `retryPolicy` | No | Optional target-app retry metadata. |
 | `onSuccess.handlerKey` | No | Optional target-app success handler key. |
 | `onFailure.handlerKey` | No | Optional target-app failure handler key. |
 
@@ -248,13 +259,45 @@ Supported phases:
 
 Hook IDs and handler keys must be lowercase snake_case identifiers. A workflow cannot define two hooks for the same `phase`, `targetType`, and `targetId`.
 
+Scheduled hooks require a valid `handlerKey`. Only `while_in_state` hooks may define `schedule`; schedules on `before_transition`, `on_state_entry`, or `on_terminal_entry` are invalid.
+
+Supported schedule shapes:
+
+| Trigger | Shape | Rule |
+| --- | --- | --- |
+| `after_duration` | `{ "trigger": "after_duration", "delayMs": number }` | `delayMs` must be a positive integer in milliseconds. |
+| `every_interval` | `{ "trigger": "every_interval", "intervalMs": number }` | `intervalMs` must be a positive integer in milliseconds. |
+
+Optional retry policy shape:
+
+```json
+{ "maxAttempts": 3, "delayMs": 60000 }
+```
+
+- `maxAttempts` must be a positive integer.
+- `delayMs` must be a non-negative integer in milliseconds.
+
+Example FileCatalog-style scheduled hook:
+
+```json
+{
+  "id": "while_in_state_unsupported",
+  "phase": "while_in_state",
+  "targetType": "state",
+  "targetId": "unsupported",
+  "handlerKey": "recheck_file_type_support",
+  "schedule": { "trigger": "every_interval", "intervalMs": 900000 },
+  "retryPolicy": { "maxAttempts": 3, "delayMs": 60000 }
+}
+```
+
 ## Bundled Workflow Definition
 
 A bundled workflow definition has the same workflow fields as a linked workflow definition and adds `embeddedStateMachineDefinition`.
 
 ```json
 {
-  "schemaVersion": "0.5.0",
+  "schemaVersion": "0.6.0",
   "appName": "Example App",
   "workflowVersion": "0.1.0",
   "id": "scan_job_workflow",
@@ -335,7 +378,7 @@ When a workflow is imported, it is reconciled to the effective state-machine def
 
 ### Legacy Workflow Imports
 
-The editor accepts workflow schema `0.1.0`, `0.2.0`, `0.3.0`, and `0.4.0` imports and upgrades them in memory to current schema `0.5.0`.
+The editor accepts workflow schema `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, and `0.5.0` imports and upgrades them in memory to current schema `0.6.0`. Browser-local Library workflows and current workspace drafts with those schema versions are also upgraded in memory when loaded. Loading an old saved record does not rewrite it; the upgraded schema is saved only when the user saves or duplicates the workflow.
 
 Legacy normalization rules:
 
@@ -346,5 +389,7 @@ Legacy normalization rules:
 - missing `buckets` becomes `[]`
 - missing `hooks` becomes `[]`
 - legacy `action.processing.handlerKey` values become `before_transition` lifecycle hooks unless an explicit hook already exists for the same action
+- imported hook `schedule` and `retryPolicy` objects are preserved closely enough for validation to report unsupported triggers, invalid durations, and invalid retry fields
+- missing schedules are not invented for imported `while_in_state` hooks; those hooks load visibly and block workflow export until the author chooses a valid schedule and handler key
 
-New exports always use workflow schema `0.5.0`, always omit action-level `processing`, and always include `buckets` and `hooks` arrays.
+New exports always use workflow schema `0.6.0`, always omit action-level `processing`, and always include `buckets` and `hooks` arrays.

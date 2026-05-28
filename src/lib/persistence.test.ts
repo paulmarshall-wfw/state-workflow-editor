@@ -6,7 +6,7 @@ import {
   createDefinitionLibraryStorage,
 } from "./persistence";
 import { StateMachineDefinition } from "./stateMachine";
-import { WorkflowDefinition } from "./workflow";
+import { WORKFLOW_SCHEMA_VERSION, WorkflowDefinition } from "./workflow";
 
 const stateMachineDefinition: StateMachineDefinition<string> = {
   schemaVersion: "0.2.0",
@@ -22,7 +22,7 @@ const stateMachineDefinition: StateMachineDefinition<string> = {
 };
 
 const workflowDefinition: WorkflowDefinition<string> = {
-  schemaVersion: "0.5.0",
+  schemaVersion: WORKFLOW_SCHEMA_VERSION,
   appName: "Example Project",
   workflowVersion: "0.1.0",
   id: "scan_job_workflow",
