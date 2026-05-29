@@ -3001,6 +3001,7 @@ function WorkflowLifecycleEditor({
   const scheduleUnit = getPreferredScheduleUnit(scheduleDurationMs);
   const scheduleDurationAmount =
     scheduleDurationMs === undefined ? "" : String(scheduleDurationMs / getScheduleUnitFactorMs(scheduleUnit));
+  const showRetryControls = hook.phase === "while_in_state" || Boolean(hook.retryPolicy);
 
   return (
     <>
@@ -3107,7 +3108,7 @@ function WorkflowLifecycleEditor({
             spellCheck={false}
           />
 
-          {hook.phase === "while_in_state" ? (
+          {showRetryControls ? (
             <>
               <label htmlFor="lifecycle-retry-attempts">Retry Max Attempts</label>
               <input

@@ -2021,6 +2021,58 @@ describe("App", () => {
     expect(screen.getByLabelText("Retry Delay Ms")).toBeInTheDocument();
   });
 
+  it("shows retry controls for imported unsupported retry metadata so it can be cleared", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const json = JSON.stringify({
+      schemaVersion: "0.6.0",
+      appName: "Article Manager",
+      workflowVersion: "1.0.0",
+      id: "article_workflow",
+      stateMachine: { id: "scan_job_state", definitionVersion: "0.1.0" },
+      states: ["queued", "running", "completed", "failed", "cancelled"],
+      actions: [],
+      buckets: [],
+      hooks: [
+        {
+          id: "entry_running",
+          phase: "on_state_entry",
+          targetType: "state",
+          targetId: "running",
+          handlerKey: "check_running",
+          retryPolicy: { maxAttempts: 3, delayMs: 1000 },
+        },
+      ],
+    });
+
+    fireEvent.change(screen.getByLabelText("Import workflow JSON definition"), {
+      target: { files: [createTextFile(json, "invalid-retry-workflow.json")] },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Lifecycle" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workflow ID")).toHaveValue("article_workflow");
+    });
+
+    expect(screen.getByLabelText("Retry Max Attempts")).toHaveValue(3);
+    expect(screen.getByLabelText("Retry Delay Ms")).toHaveValue(1000);
+    expect(
+      within(await openWorkflowValidationIssues(user)).getByText(/can only define retry policy for while-in-state hooks/),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close workflow validation issues" }));
+    await expectWorkflowAction(user, "Export Workflow", false);
+
+    await user.clear(screen.getByLabelText("Retry Max Attempts"));
+    await user.clear(screen.getByLabelText("Retry Delay Ms"));
+
+    await expectWorkflowAction(user, "Export Workflow", true);
+    expect(screen.queryByLabelText("Retry Max Attempts")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Retry Delay Ms")).not.toBeInTheDocument();
+  });
+
   it("regenerates lifecycle hook IDs when state targets change", async () => {
     const user = userEvent.setup();
     const write = vi.fn().mockResolvedValue(undefined);
