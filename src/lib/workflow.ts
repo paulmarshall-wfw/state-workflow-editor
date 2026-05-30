@@ -564,6 +564,7 @@ export function defineWorkflow<State extends string>(
         ? {
             ...workflow.embeddedStateMachineDefinition,
             states: [...workflow.embeddedStateMachineDefinition.states],
+            entryStates: [...workflow.embeddedStateMachineDefinition.entryStates],
             terminalStates: [...workflow.embeddedStateMachineDefinition.terminalStates],
             transitions: workflow.embeddedStateMachineDefinition.transitions.map((transition) => ({ ...transition })),
           }

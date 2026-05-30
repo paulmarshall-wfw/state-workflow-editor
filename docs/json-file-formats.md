@@ -4,7 +4,7 @@ This document defines the JSON files imported and exported by State Workflow Edi
 
 Current exported file-format versions:
 
-- State-machine definition: `schemaVersion: "0.2.0"`
+- State-machine definition: `schemaVersion: "0.3.0"`
 - Workflow definition: `schemaVersion: "0.7.0"`
 - Bundled workflow definition: `schemaVersion: "0.7.0"` plus `embeddedStateMachineDefinition`
 
@@ -14,7 +14,7 @@ Current exported file-format versions:
 
 | File type | Export button | Filename pattern | Embeds state machine | Normal export includes |
 | --- | --- | --- | --- | --- |
-| State-machine definition | Export State Machine | `(target-app)-(definition-version)-state-specification.json` | Not applicable | State IDs, terminal states, legal transitions |
+| State-machine definition | Export State Machine | `(target-app)-(definition-version)-state-specification.json` | Not applicable | State IDs, entry states, terminal states, legal transitions |
 | Workflow definition | Export Workflow | `(target-app)-(workflow-version)-workflow-definition.json` | No | State visibility, actions, buckets, lifecycle hooks |
 | Bundled workflow definition | Export Bundled Workflow | `(target-app)-(workflow-version)-workflow-definition-bundled.json` | Yes | Workflow definition plus full state-machine definition |
 
@@ -31,15 +31,16 @@ Browser-local Library storage uses IndexedDB records keyed from definition IDs a
 
 ## State-Machine Definition
 
-State-machine definitions are the project-agnostic core contract. They define only valid states, terminal states, and legal state-to-state transitions.
+State-machine definitions are the project-agnostic core contract. They define only valid states, nominated entry states, terminal states, and legal state-to-state transitions.
 
 ```json
 {
-  "schemaVersion": "0.2.0",
+  "schemaVersion": "0.3.0",
   "appName": "Example App",
   "definitionVersion": "0.1.0",
   "id": "scan_job_state",
   "states": ["queued", "running", "completed", "failed", "cancelled"],
+  "entryStates": ["queued"],
   "terminalStates": ["completed", "cancelled"],
   "transitions": [
     { "from": "queued", "to": "running" },
@@ -54,19 +55,24 @@ State-machine definitions are the project-agnostic core contract. They define on
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `schemaVersion` | Yes | Must be `"0.2.0"` for current exports. |
+| `schemaVersion` | Yes | Must be `"0.3.0"` for current exports. |
 | `appName` | Yes | Human-facing target app/project name. |
 | `definitionVersion` | Yes | User-controlled SemVer for this state-machine definition. |
 | `id` | Yes | Stable state-machine definition ID. |
 | `states` | Yes | Ordered list of state IDs. Must contain at least one state. |
+| `entryStates` | Yes | State IDs nominated as valid creation or start states for target-app use. Empty arrays are valid and mean no entry states are nominated. |
 | `terminalStates` | Yes | State IDs that have no outgoing transitions. Each must exist in `states`. |
 | `transitions` | Yes | Legal transitions between states. Each `from` and `to` must exist in `states`. |
+
+`entryStates` are metadata only. They are distinct from the editor's selected state and from workflow actions, and they do not imply runtime record creation behavior, guards, authorization, persistence, or transition execution.
 
 ### Validation
 
 - `states` cannot be empty.
 - State IDs must be lowercase snake_case identifiers.
 - State IDs must be unique.
+- Entry states must be listed in `states`.
+- Entry state entries must be unique.
 - Terminal states must be listed in `states`.
 - Terminal state entries must be unique.
 - Transitions must reference known states.
@@ -309,11 +315,12 @@ A bundled workflow definition has the same workflow fields as a linked workflow 
     "definitionVersion": "0.1.0"
   },
   "embeddedStateMachineDefinition": {
-    "schemaVersion": "0.2.0",
+    "schemaVersion": "0.3.0",
     "appName": "Example App",
     "definitionVersion": "0.1.0",
     "id": "scan_job_state",
     "states": ["queued", "running", "completed", "failed", "cancelled"],
+    "entryStates": ["queued"],
     "terminalStates": ["completed", "cancelled"],
     "transitions": [
       { "from": "queued", "to": "running" },
@@ -360,6 +367,8 @@ Valid imports update the current workspace draft. They are not saved as Library 
 ### State Machine Import
 
 The State Machine import control accepts `.json` state-machine definition files. The imported file is normalized into the current state-machine shape and then validated.
+
+The editor accepts state-machine schema `0.2.0` imports and upgrades them in memory to current schema `0.3.0`. Missing `entryStates` becomes `[]`. Loading an old saved record does not rewrite it; the upgraded schema is saved only when the user explicitly saves or duplicates the state-machine definition.
 
 ### Workflow Import
 

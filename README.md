@@ -2,7 +2,7 @@
 
 A TypeScript state-machine and workflow contract library with a browser-based definition editor.
 
-The state-machine layer is deliberately narrow. It owns valid states, allowed state-to-state transitions, terminal states, and definition validation. The workflow layer maps named app actions onto valid state-machine transitions and may add optional bucket presentation metadata, but guards, side effects, persistence, authorization, jobs, retries, idempotency, and runtime orchestration remain app/runtime concerns.
+The state-machine layer is deliberately narrow. It owns valid states, nominated entry states, allowed state-to-state transitions, terminal states, and definition validation. The workflow layer maps named app actions onto valid state-machine transitions and may add optional bucket presentation metadata, but guards, side effects, persistence, authorization, jobs, retries, idempotency, and runtime orchestration remain app/runtime concerns.
 
 ## Status
 
@@ -41,11 +41,12 @@ The dedicated format reference is [docs/json-file-formats.md](docs/json-file-for
 
 ```json
 {
-  "schemaVersion": "0.2.0",
+  "schemaVersion": "0.3.0",
   "appName": "Example App",
   "definitionVersion": "0.1.0",
   "id": "scan_job_state",
   "states": ["queued", "running", "completed", "failed", "cancelled"],
+  "entryStates": ["queued"],
   "terminalStates": ["completed", "cancelled"],
   "transitions": [
     { "from": "queued", "to": "running" },
@@ -201,6 +202,8 @@ A target app is an app that ingests a state-machine definition and workflow defi
 
 The exported workflow is a contract, not an executable workflow engine. Buckets and state visibility describe an optional user-facing workflow surface that a target app may render. Hidden or missing buckets and hidden states remain valid contract metadata choices and do not affect whether actions are valid.
 
+State-machine `entryStates` are project-agnostic contract metadata that nominate states a target app may treat as valid creation or start states. They are distinct from the editor's currently selected state and from workflow actions. Empty `entryStates` arrays are valid and mean the state-machine definition does not nominate entry states. Entry states do not imply runtime record creation behavior, guards, authorization, persistence, or transition execution.
+
 Actions describe how a valid transition is initiated. Actions are grounded in the state-machine states and legal transitions, not in bucket placement. Action `id` is the stable runtime/audit identifier; `label` is the visible button text. Generated/default IDs are starting points and should be edited to semantic app-facing IDs when needed. Audit consumers should store the exact workflow action `id`, previous state, and new state. A `user` action must be visible. An `automatic` action must be hidden from user controls. Actions do not carry handler keys in schema `0.7.0`.
 
 Lifecycle hooks describe optional app-specific processing points. Supported phases are `before_transition` for action-targeted pre-transition work, `on_state_entry` for state-entry work, `while_in_state` for scheduled work while an item remains in a state, and `on_terminal_entry` for terminal-state entry work. Each hook may define a main `handlerKey`, plus optional success and failure handler keys. `while_in_state` hooks must define a schedule using either `after_duration` with `delayMs` or `every_interval` with `intervalMs`, and may define retry metadata with `maxAttempts` and `delayMs`. These keys and schedules are identifiers and contract metadata for the target app; this editor does not execute timers, evaluate due hooks, retry work, or guarantee state changes from success or failure.
@@ -214,7 +217,7 @@ Failure handling, timers, due-work records, retries, logging, authorization, ide
 - The light/dark mode icon appears beside the app title and version.
 - The app has State Machine, Workflow, Library, and Settings pages.
 - The Target App control includes a folder picker that updates both state-machine and workflow app names.
-- The State Machine page uses three independently scrolling columns: states, selected-state transitions, and a read-only Mermaid preview. Mermaid previews default to vertical top-to-bottom layout and include a local horizontal/vertical direction toggle.
+- The State Machine page uses three independently scrolling columns: states, selected-state transitions, and a read-only Mermaid preview. State rows include Entry and Terminal markers. Mermaid previews default to vertical top-to-bottom layout and include a local horizontal/vertical direction toggle.
 - The Workflow page has Actions, Buckets, and Lifecycle views. Actions maps stable action IDs and visible button labels onto legal state-machine transitions and lets users set trigger mode and user visibility. Buckets lets users edit bucket names directly, toggle bucket visibility, add states to the selected bucket from an all-state dropdown, toggle workflow-level state visibility, and remove states from the selected bucket. Lifecycle lets users add app-specific handler keys for before-transition, state-entry, while-in-state, and terminal-entry phases, with schedule and optional retry controls for while-in-state hooks plus optional success and failure handler metadata. All workflow views retain the action-labelled Mermaid preview and the same local horizontal/vertical direction toggle; in Buckets view, the selected bucket's states use solid boundaries while all other states use dotted boundaries.
 - The Library page manages browser-local saved state-machine definitions and their exact-version linked workflow definitions.
 
@@ -226,6 +229,7 @@ validateStateMachineDefinition(definition);
 canTransition(machine, from, to);
 assertTransition(machine, from, to);
 getAllowedTargetStates(machine, from);
+isEntryState(machine, state);
 isTerminalState(machine, state);
 validateWorkflowDefinition(workflow, stateMachineDefinition);
 defineWorkflow(workflow, stateMachineDefinition);

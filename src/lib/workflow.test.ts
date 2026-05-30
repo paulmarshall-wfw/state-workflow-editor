@@ -10,11 +10,12 @@ import {
 } from "./workflow";
 
 const stateMachine: StateMachineDefinition = {
-  schemaVersion: "0.2.0",
+  schemaVersion: "0.3.0",
   appName: "Example Project",
   definitionVersion: "0.1.0",
   id: "scan_job_state",
   states: ["queued", "running", "completed", "failed", "cancelled"],
+  entryStates: ["queued"],
   terminalStates: ["completed", "cancelled"],
   transitions: [
     { from: "queued", to: "running" },

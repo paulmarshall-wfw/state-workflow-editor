@@ -8,6 +8,7 @@ import {
   canTransition,
   defineStateMachine,
   getAllowedTargetStates,
+  isEntryState,
   isTerminalState,
   validateStateMachineDefinition,
 } from "./stateMachine";
@@ -18,6 +19,7 @@ const validDefinition = {
   definitionVersion: "0.1.0",
   id: "scan_job_state",
   states: ["queued", "running", "completed", "failed", "cancelled"],
+  entryStates: ["queued"],
   terminalStates: ["completed", "cancelled"],
   transitions: [
     { from: "queued", to: "running" },
@@ -41,6 +43,7 @@ describe("validateStateMachineDefinition", () => {
     const result = validateStateMachineDefinition({
       ...validDefinition,
       states: ["queued", "queued", "running"],
+      entryStates: [],
       terminalStates: [],
       transitions: [],
     });
@@ -95,6 +98,47 @@ describe("validateStateMachineDefinition", () => {
       expect.objectContaining({
         code: "unknown_terminal_state",
       }),
+    );
+  });
+
+  it("accepts empty and terminal entry states", () => {
+    expect(
+      validateStateMachineDefinition({
+        ...validDefinition,
+        entryStates: [],
+      }),
+    ).toEqual({
+      valid: true,
+      errors: [],
+    });
+
+    expect(
+      validateStateMachineDefinition({
+        ...validDefinition,
+        entryStates: ["completed"],
+      }),
+    ).toEqual({
+      valid: true,
+      errors: [],
+    });
+  });
+
+  it("rejects invalid entry states", () => {
+    const result = validateStateMachineDefinition({
+      ...validDefinition,
+      entryStates: ["queued", "missing", "queued"],
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "unknown_entry_state",
+        }),
+        expect.objectContaining({
+          code: "duplicate_entry_state",
+        }),
+      ]),
     );
   });
 
@@ -178,6 +222,10 @@ describe("state machine runtime", () => {
     const machine = defineStateMachine(validDefinition);
 
     expect(getAllowedTargetStates(machine, "running")).toEqual(["completed", "failed", "cancelled"]);
+    expect(machine.entryStates).toEqual(new Set(["queued"]));
+    expect(machine.definition.entryStates).toEqual(["queued"]);
+    expect(isEntryState(machine, "queued")).toBe(true);
+    expect(isEntryState(machine, "running")).toBe(false);
     expect(isTerminalState(machine, "completed")).toBe(true);
     expect(isTerminalState(machine, "running")).toBe(false);
   });

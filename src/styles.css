@@ -667,7 +667,7 @@ button:focus-visible {
 }
 
 .state-row {
-  grid-template-columns: 30px minmax(160px, 1fr) auto auto;
+  grid-template-columns: 30px minmax(160px, 1fr) auto auto auto;
 }
 
 .state-row.selected {

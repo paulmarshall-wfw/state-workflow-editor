@@ -1,4 +1,4 @@
-export const STATE_MACHINE_SCHEMA_VERSION = "0.2.0" as const;
+export const STATE_MACHINE_SCHEMA_VERSION = "0.3.0" as const;
 
 export type StateMachineSchemaVersion = typeof STATE_MACHINE_SCHEMA_VERSION;
 
@@ -13,6 +13,7 @@ export type StateMachineDefinition<State extends string = string> = {
   definitionVersion: string;
   id: string;
   states: readonly State[];
+  entryStates: readonly State[];
   terminalStates: readonly State[];
   transitions: readonly StateTransition<State>[];
 };
@@ -26,6 +27,8 @@ export type StateMachineValidationCode =
   | "empty_states"
   | "invalid_state_id"
   | "duplicate_state"
+  | "unknown_entry_state"
+  | "duplicate_entry_state"
   | "unknown_terminal_state"
   | "duplicate_terminal_state"
   | "unknown_transition_state"
@@ -46,6 +49,7 @@ export type StateMachineValidationResult = {
 export type DefinedStateMachine<State extends string = string> = {
   definition: StateMachineDefinition<State>;
   states: ReadonlySet<State>;
+  entryStates: ReadonlySet<State>;
   terminalStates: ReadonlySet<State>;
   transitions: ReadonlySet<string>;
   outgoingTransitions: ReadonlyMap<State, readonly State[]>;
@@ -85,6 +89,7 @@ export function validateStateMachineDefinition<State extends string>(
   const errors: StateMachineValidationError[] = [];
   const stateCounts = countValues(definition.states);
   const states = new Set(definition.states);
+  const entryCounts = countValues(definition.entryStates);
   const terminalCounts = countValues(definition.terminalStates);
   const terminalStates = new Set(definition.terminalStates);
   const transitionCounts = new Map<string, number>();
@@ -151,6 +156,26 @@ export function validateStateMachineDefinition<State extends string>(
         code: "duplicate_state",
         message: `State "${state}" is defined more than once.`,
         path: "states",
+      });
+    }
+  }
+
+  definition.entryStates.forEach((state, index) => {
+    if (!states.has(state)) {
+      errors.push({
+        code: "unknown_entry_state",
+        message: `Entry state "${state}" is not listed in states.`,
+        path: `entryStates.${index}`,
+      });
+    }
+  });
+
+  for (const [state, count] of entryCounts) {
+    if (count > 1) {
+      errors.push({
+        code: "duplicate_entry_state",
+        message: `Entry state "${state}" is listed more than once.`,
+        path: "entryStates",
       });
     }
   }
@@ -238,10 +263,12 @@ export function defineStateMachine<State extends string>(
       definitionVersion: definition.definitionVersion,
       id: definition.id,
       states: [...definition.states],
+      entryStates: [...definition.entryStates],
       terminalStates: [...definition.terminalStates],
       transitions: definition.transitions.map((transition) => ({ ...transition })),
     },
     states: new Set(definition.states),
+    entryStates: new Set(definition.entryStates),
     terminalStates: new Set(definition.terminalStates),
     transitions: new Set(
       definition.transitions.map((transition) => transitionKey(transition.from, transition.to)),
@@ -290,6 +317,13 @@ export function isTerminalState<State extends string>(
   state: State,
 ): boolean {
   return machine.terminalStates.has(state);
+}
+
+export function isEntryState<State extends string>(
+  machine: DefinedStateMachine<State>,
+  state: State,
+): boolean {
+  return machine.entryStates.has(state);
 }
 
 function transitionKey(from: string, to: string): string {

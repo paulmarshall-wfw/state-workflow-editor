@@ -148,6 +148,7 @@ const initialDefinition: EditableDefinition = {
   definitionVersion: "0.1.0",
   id: "scan_job_state",
   states: ["queued", "running", "completed", "failed", "cancelled"],
+  entryStates: ["queued"],
   terminalStates: ["completed", "cancelled"],
   transitions: [
     { from: "queued", to: "running" },
@@ -338,13 +339,14 @@ export function App() {
         }
 
         if (draft?.key === CURRENT_WORKSPACE_DRAFT_KEY) {
+          const draftDefinition = normalizeImportedDefinition(draft.definition);
           const draftWorkflow = normalizeImportedWorkflowDefinition(
             draft.workflow as ImportedWorkflowDefinition,
-            draft.definition,
+            draftDefinition,
           );
-          setDefinition(draft.definition);
+          setDefinition(draftDefinition);
           setWorkflow(removeEmbeddedStateMachine(draftWorkflow));
-          setSelectedState(draft.definition.states[0] ?? "");
+          setSelectedState(draftDefinition.states[0] ?? "");
           setSelectedBucketId(draftWorkflow.buckets[0]?.id ?? "");
           setSelectedLifecycleHookId(draftWorkflow.hooks[0]?.id ?? null);
 
@@ -357,7 +359,7 @@ export function App() {
           }
 
           lastDraftSignatureRef.current = buildDraftSignature(
-            draft.definition,
+            draftDefinition,
             removeEmbeddedStateMachine(draftWorkflow),
             draft.activePage,
             draft.selectedWorkflowView,
@@ -499,6 +501,7 @@ export function App() {
       return {
         ...current,
         states: nextStates,
+        entryStates: current.entryStates.map((state) => (state === previousState ? nextState : state)),
         terminalStates: current.terminalStates.map((state) => (state === previousState ? nextState : state)),
         transitions: current.transitions.map((transition) => ({
           from: transition.from === previousState ? nextState : transition.from,
@@ -537,6 +540,7 @@ export function App() {
       return {
         ...current,
         states: nextStates,
+        entryStates: current.entryStates.filter((state) => state !== removedState),
         terminalStates: current.terminalStates.filter((state) => state !== removedState),
         transitions: current.transitions.filter(
           (transition) => transition.from !== removedState && transition.to !== removedState,
@@ -579,6 +583,15 @@ export function App() {
       terminalStates: checked
         ? Array.from(new Set([...current.terminalStates, state]))
         : current.terminalStates.filter((terminalState) => terminalState !== state),
+    }));
+  }
+
+  function toggleEntryState(state: string, checked: boolean) {
+    setDefinition((current) => ({
+      ...current,
+      entryStates: checked
+        ? Array.from(new Set([...current.entryStates, state]))
+        : current.entryStates.filter((entryState) => entryState !== state),
     }));
   }
 
@@ -1201,17 +1214,18 @@ export function App() {
         return;
       }
 
-      const result = validateStateMachineDefinition(record.definition);
+      const nextDefinition = normalizeImportedDefinition(record.definition);
+      const result = validateStateMachineDefinition(nextDefinition);
 
       if (!result.valid) {
         setLibraryMessage(`Saved state machine is invalid: ${result.errors.map((error) => error.message).join(" ")}`);
         return;
       }
 
-      const nextWorkflow = resetWorkflowFromStateMachine(workflow, record.definition);
+      const nextWorkflow = resetWorkflowFromStateMachine(workflow, nextDefinition);
 
-      setDefinition(record.definition);
-      setSelectedState(record.definition.states[0] ?? "");
+      setDefinition(nextDefinition);
+      setSelectedState(nextDefinition.states[0] ?? "");
       setWorkflow(nextWorkflow);
       setSelectedBucketId(nextWorkflow.buckets[0]?.id ?? "");
       setSelectedLifecycleHookId(null);
@@ -1244,20 +1258,21 @@ export function App() {
         return;
       }
 
+      const normalizedStateMachine = normalizeImportedDefinition(linkedStateMachine.definition);
       const normalizedWorkflow = normalizeImportedWorkflowDefinition(
         record.definition as ImportedWorkflowDefinition,
-        linkedStateMachine.definition,
+        normalizedStateMachine,
       );
-      const reconciliation = reconcileWorkflowToStateMachine(normalizedWorkflow, linkedStateMachine.definition);
-      const result = validateWorkflowDefinition(reconciliation.workflow, linkedStateMachine.definition);
+      const reconciliation = reconcileWorkflowToStateMachine(normalizedWorkflow, normalizedStateMachine);
+      const result = validateWorkflowDefinition(reconciliation.workflow, normalizedStateMachine);
 
       if (!result.valid) {
         setLibraryMessage(`Saved workflow is invalid: ${result.errors.map((error) => error.message).join(" ")}`);
         return;
       }
 
-      setDefinition(linkedStateMachine.definition);
-      setSelectedState(linkedStateMachine.definition.states[0] ?? "");
+      setDefinition(normalizedStateMachine);
+      setSelectedState(normalizedStateMachine.states[0] ?? "");
       setWorkflow(removeEmbeddedStateMachine(reconciliation.workflow));
       setSelectedBucketId(reconciliation.workflow.buckets[0]?.id ?? "");
       setSelectedLifecycleHookId(reconciliation.workflow.hooks[0]?.id ?? null);
@@ -1290,7 +1305,7 @@ export function App() {
         return;
       }
 
-      const nextDefinition = { ...record.definition, definitionVersion: nextVersion.trim() };
+      const nextDefinition = { ...normalizeImportedDefinition(record.definition), definitionVersion: nextVersion.trim() };
       const result = validateStateMachineDefinition(nextDefinition);
 
       if (!result.valid) {
@@ -1342,12 +1357,13 @@ export function App() {
         return;
       }
 
+      const normalizedStateMachine = normalizeImportedDefinition(linkedStateMachine.definition);
       const normalizedWorkflow = normalizeImportedWorkflowDefinition(
         record.definition as ImportedWorkflowDefinition,
-        linkedStateMachine.definition,
+        normalizedStateMachine,
       );
       const nextWorkflow = { ...normalizedWorkflow, workflowVersion: nextVersion.trim() };
-      const result = validateWorkflowDefinition(nextWorkflow, linkedStateMachine.definition);
+      const result = validateWorkflowDefinition(nextWorkflow, normalizedStateMachine);
 
       if (!result.valid) {
         setLibraryMessage(`New workflow version is invalid: ${result.errors.map((error) => error.message).join(" ")}`);
@@ -1813,10 +1829,12 @@ export function App() {
                 <StateList
                   states={definition.states}
                   selectedState={selectedState}
+                  entryStates={definition.entryStates}
                   terminalStates={definition.terminalStates}
                   onSelect={setSelectedState}
                   onRename={renameState}
                   onRemove={removeState}
+                  onToggleEntry={toggleEntryState}
                   onToggleTerminal={toggleTerminalState}
                   onReorder={moveState}
                 />
@@ -2664,19 +2682,23 @@ function JsonImportDropZone({
 function StateList({
   states,
   selectedState,
+  entryStates,
   terminalStates,
   onSelect,
   onRename,
   onRemove,
+  onToggleEntry,
   onToggleTerminal,
   onReorder,
 }: {
   states: readonly string[];
   selectedState: string;
+  entryStates: readonly string[];
   terminalStates: readonly string[];
   onSelect: (state: string) => void;
   onRename: (index: number, state: string) => void;
   onRemove: (index: number) => void;
+  onToggleEntry: (state: string, checked: boolean) => void;
   onToggleTerminal: (state: string, checked: boolean) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
 }) {
@@ -2775,6 +2797,16 @@ function StateList({
               onChange={(event) => onRename(index, event.target.value)}
               spellCheck={false}
             />
+            <label className="inline-check">
+              <input
+                type="checkbox"
+                aria-label={`${state || `State ${index + 1}`} entry`}
+                checked={entryStates.includes(state)}
+                onChange={(event) => onToggleEntry(state, event.target.checked)}
+                disabled={!state}
+              />
+              Entry
+            </label>
             <label className="inline-check">
               <input
                 type="checkbox"
@@ -4175,11 +4207,12 @@ function formatWorkflowSyncMessage(summary: WorkflowReconciliationSummary) {
 
 function normalizeImportedDefinition(value: Partial<EditableDefinition>): EditableDefinition {
   return {
-    schemaVersion: value.schemaVersion ?? STATE_MACHINE_SCHEMA_VERSION,
+    schemaVersion: STATE_MACHINE_SCHEMA_VERSION,
     appName: value.appName ?? "",
     definitionVersion: value.definitionVersion ?? "",
     id: value.id ?? "",
     states: Array.isArray(value.states) ? value.states : [],
+    entryStates: Array.isArray(value.entryStates) ? value.entryStates : [],
     terminalStates: Array.isArray(value.terminalStates) ? value.terminalStates : [],
     transitions: Array.isArray(value.transitions) ? value.transitions : [],
   };
@@ -4454,6 +4487,8 @@ export function buildMermaidDiagram(
 ): string {
   const palette = getMermaidPreviewPalette(theme);
   const lines = [getMermaidFlowchartDeclaration(diagramDirection)];
+  const entryStateSet = new Set(machine.entryStates);
+  const terminalStateSet = new Set(machine.terminalStates);
 
   for (const state of machine.states) {
     lines.push(`  ${state}["${state}"]`);
@@ -4464,17 +4499,39 @@ export function buildMermaidDiagram(
   }
 
   if (machine.states.length > 0) {
+    const normalStates = machine.states.filter((state) => !entryStateSet.has(state) && !terminalStateSet.has(state));
+    const entryStates = machine.states.filter((state) => entryStateSet.has(state) && !terminalStateSet.has(state));
+    const terminalStates = machine.states.filter((state) => !entryStateSet.has(state) && terminalStateSet.has(state));
+    const entryTerminalStates = machine.states.filter((state) => entryStateSet.has(state) && terminalStateSet.has(state));
+
     lines.push(
       `  classDef state fill:${palette.stateFill},stroke:${palette.stateStroke},stroke-width:2px,color:${palette.text};`,
     );
-    lines.push(`  class ${machine.states.join(",")} state;`);
-  }
-
-  if (machine.terminalStates.length > 0) {
     lines.push(
       `  classDef terminal fill:${palette.stateFill},stroke:${palette.terminalStroke},stroke-width:3px,color:${palette.text};`,
     );
-    lines.push(`  class ${machine.terminalStates.join(",")} terminal;`);
+    lines.push(
+      `  classDef entry fill:${palette.stateFill},stroke:${palette.entryStroke},stroke-width:3px,stroke-dasharray:6 2,color:${palette.text};`,
+    );
+    lines.push(
+      `  classDef entryTerminal fill:${palette.stateFill},stroke:${palette.terminalStroke},stroke-width:4px,stroke-dasharray:6 2,color:${palette.text};`,
+    );
+
+    if (normalStates.length > 0) {
+      lines.push(`  class ${normalStates.join(",")} state;`);
+    }
+
+    if (terminalStates.length > 0) {
+      lines.push(`  class ${terminalStates.join(",")} terminal;`);
+    }
+
+    if (entryStates.length > 0) {
+      lines.push(`  class ${entryStates.join(",")} entry;`);
+    }
+
+    if (entryTerminalStates.length > 0) {
+      lines.push(`  class ${entryTerminalStates.join(",")} entryTerminal;`);
+    }
   }
 
   return lines.join("\n");
@@ -4491,6 +4548,7 @@ export function buildWorkflowMermaidDiagram(
   const lines = [getMermaidFlowchartDeclaration(diagramDirection)];
   const isFocusedPreview = focusStateIds !== undefined;
   const focusStateSet = new Set(focusStateIds ?? []);
+  const entryStateSet = new Set(machine.entryStates);
   const terminalStateSet = new Set(machine.terminalStates);
 
   for (const state of machine.states) {
@@ -4502,52 +4560,110 @@ export function buildWorkflowMermaidDiagram(
   }
 
   if (machine.states.length > 0 && !isFocusedPreview) {
+    const normalStates = machine.states.filter((state) => !entryStateSet.has(state) && !terminalStateSet.has(state));
+    const entryStates = machine.states.filter((state) => entryStateSet.has(state) && !terminalStateSet.has(state));
+    const terminalStates = machine.states.filter((state) => !entryStateSet.has(state) && terminalStateSet.has(state));
+    const entryTerminalStates = machine.states.filter((state) => entryStateSet.has(state) && terminalStateSet.has(state));
+
     lines.push(
       `  classDef state fill:${palette.stateFill},stroke:${palette.stateStroke},stroke-width:2px,color:${palette.text};`,
     );
-    lines.push(`  class ${machine.states.join(",")} state;`);
-  }
-
-  if (machine.terminalStates.length > 0 && !isFocusedPreview) {
     lines.push(
       `  classDef terminal fill:${palette.stateFill},stroke:${palette.terminalStroke},stroke-width:3px,color:${palette.text};`,
     );
-    lines.push(`  class ${machine.terminalStates.join(",")} terminal;`);
+    lines.push(
+      `  classDef entry fill:${palette.stateFill},stroke:${palette.entryStroke},stroke-width:3px,stroke-dasharray:6 2,color:${palette.text};`,
+    );
+    lines.push(
+      `  classDef entryTerminal fill:${palette.stateFill},stroke:${palette.terminalStroke},stroke-width:4px,stroke-dasharray:6 2,color:${palette.text};`,
+    );
+
+    if (normalStates.length > 0) {
+      lines.push(`  class ${normalStates.join(",")} state;`);
+    }
+
+    if (terminalStates.length > 0) {
+      lines.push(`  class ${terminalStates.join(",")} terminal;`);
+    }
+
+    if (entryStates.length > 0) {
+      lines.push(`  class ${entryStates.join(",")} entry;`);
+    }
+
+    if (entryTerminalStates.length > 0) {
+      lines.push(`  class ${entryTerminalStates.join(",")} entryTerminal;`);
+    }
   }
 
   if (isFocusedPreview && machine.states.length > 0) {
-    const focusedStates = machine.states.filter((state) => focusStateSet.has(state) && !terminalStateSet.has(state));
-    const focusedTerminalStates = machine.states.filter((state) => focusStateSet.has(state) && terminalStateSet.has(state));
-    const unfocusedStates = machine.states.filter((state) => !focusStateSet.has(state) && !terminalStateSet.has(state));
-    const unfocusedTerminalStates = machine.states.filter((state) => !focusStateSet.has(state) && terminalStateSet.has(state));
+    const isEntryTerminal = (state: string) => entryStateSet.has(state) && terminalStateSet.has(state);
+    const isEntryOnly = (state: string) => entryStateSet.has(state) && !terminalStateSet.has(state);
+    const isTerminalOnly = (state: string) => !entryStateSet.has(state) && terminalStateSet.has(state);
+    const isPlainState = (state: string) => !entryStateSet.has(state) && !terminalStateSet.has(state);
+    const focusedStates = machine.states.filter((state) => focusStateSet.has(state) && isPlainState(state));
+    const focusedEntryStates = machine.states.filter((state) => focusStateSet.has(state) && isEntryOnly(state));
+    const focusedTerminalStates = machine.states.filter((state) => focusStateSet.has(state) && isTerminalOnly(state));
+    const focusedEntryTerminalStates = machine.states.filter((state) => focusStateSet.has(state) && isEntryTerminal(state));
+    const unfocusedStates = machine.states.filter((state) => !focusStateSet.has(state) && isPlainState(state));
+    const unfocusedEntryStates = machine.states.filter((state) => !focusStateSet.has(state) && isEntryOnly(state));
+    const unfocusedTerminalStates = machine.states.filter((state) => !focusStateSet.has(state) && isTerminalOnly(state));
+    const unfocusedEntryTerminalStates = machine.states.filter((state) => !focusStateSet.has(state) && isEntryTerminal(state));
 
     lines.push(
       `  classDef state fill:${palette.stateFill},stroke:${palette.stateStroke},stroke-width:2px,color:${palette.text};`,
     );
     lines.push(
       `  classDef terminal fill:${palette.stateFill},stroke:${palette.terminalStroke},stroke-width:3px,color:${palette.text};`,
+    );
+    lines.push(
+      `  classDef entry fill:${palette.stateFill},stroke:${palette.entryStroke},stroke-width:3px,stroke-dasharray:6 2,color:${palette.text};`,
+    );
+    lines.push(
+      `  classDef entryTerminal fill:${palette.stateFill},stroke:${palette.terminalStroke},stroke-width:4px,stroke-dasharray:6 2,color:${palette.text};`,
     );
     lines.push(
       `  classDef unfocusedState fill:${palette.stateFill},stroke:${palette.stateStroke},stroke-width:2px,stroke-dasharray:2 3,color:${palette.text};`,
     );
     lines.push(
+      `  classDef unfocusedEntry fill:${palette.stateFill},stroke:${palette.entryStroke},stroke-width:3px,stroke-dasharray:2 3,color:${palette.text};`,
+    );
+    lines.push(
       `  classDef unfocusedTerminal fill:${palette.stateFill},stroke:${palette.terminalStroke},stroke-width:3px,stroke-dasharray:2 3,color:${palette.text};`,
+    );
+    lines.push(
+      `  classDef unfocusedEntryTerminal fill:${palette.stateFill},stroke:${palette.terminalStroke},stroke-width:4px,stroke-dasharray:2 3,color:${palette.text};`,
     );
 
     if (focusedStates.length > 0) {
       lines.push(`  class ${focusedStates.join(",")} state;`);
     }
 
+    if (focusedEntryStates.length > 0) {
+      lines.push(`  class ${focusedEntryStates.join(",")} entry;`);
+    }
+
     if (focusedTerminalStates.length > 0) {
       lines.push(`  class ${focusedTerminalStates.join(",")} terminal;`);
+    }
+
+    if (focusedEntryTerminalStates.length > 0) {
+      lines.push(`  class ${focusedEntryTerminalStates.join(",")} entryTerminal;`);
     }
 
     if (unfocusedStates.length > 0) {
       lines.push(`  class ${unfocusedStates.join(",")} unfocusedState;`);
     }
 
+    if (unfocusedEntryStates.length > 0) {
+      lines.push(`  class ${unfocusedEntryStates.join(",")} unfocusedEntry;`);
+    }
+
     if (unfocusedTerminalStates.length > 0) {
       lines.push(`  class ${unfocusedTerminalStates.join(",")} unfocusedTerminal;`);
+    }
+
+    if (unfocusedEntryTerminalStates.length > 0) {
+      lines.push(`  class ${unfocusedEntryTerminalStates.join(",")} unfocusedEntryTerminal;`);
     }
   }
 
@@ -4567,6 +4683,7 @@ function getMermaidPreviewPalette(theme: MermaidPreviewTheme) {
     return {
       stateFill: "#182028",
       stateStroke: "#42a9b3",
+      entryStroke: "#80d8a4",
       terminalStroke: "#f0a46f",
       text: "#eef3f7",
       arrow: "#ffffff",
@@ -4576,6 +4693,7 @@ function getMermaidPreviewPalette(theme: MermaidPreviewTheme) {
   return {
     stateFill: "#eef2f5",
     stateStroke: "#0f6b73",
+    entryStroke: "#1e6840",
     terminalStroke: "#9a431c",
     text: "#1d242d",
     arrow: "#1d242d",

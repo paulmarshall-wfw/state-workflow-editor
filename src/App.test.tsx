@@ -733,11 +733,12 @@ describe("App", () => {
 
   it("generates Mermaid source with directed transitions and terminal-state styling", () => {
     const definition = {
-      schemaVersion: "0.2.0",
+      schemaVersion: "0.3.0",
       appName: "Example Project",
       definitionVersion: "0.1.0",
       id: "scan_job_state",
       states: ["queued", "running", "completed"],
+      entryStates: ["queued"],
       terminalStates: ["completed"],
       transitions: [
         { from: "queued", to: "running" },
@@ -753,18 +754,37 @@ describe("App", () => {
     expect(source).toContain("queued --> running");
     expect(source).toContain("running --> completed");
     expect(source).toContain("classDef state fill:#eef2f5");
+    expect(source).toContain("class queued entry;");
     expect(source).toContain("class completed terminal;");
     expect(darkSource).toContain("classDef state fill:#182028");
     expect(darkSource).toContain("color:#eef3f7");
   });
 
+  it("generates Mermaid source with combined entry and terminal styling", () => {
+    const definition = {
+      schemaVersion: "0.3.0",
+      appName: "Example Project",
+      definitionVersion: "0.1.0",
+      id: "single_state_machine",
+      states: ["done"],
+      entryStates: ["done"],
+      terminalStates: ["done"],
+      transitions: [],
+    } as const;
+    const source = buildMermaidDiagram(definition);
+
+    expect(source).toContain("classDef entryTerminal");
+    expect(source).toContain("class done entryTerminal;");
+  });
+
   it("generates workflow Mermaid source with action-labelled transitions", () => {
     const definition = {
-      schemaVersion: "0.2.0",
+      schemaVersion: "0.3.0",
       appName: "Example Project",
       definitionVersion: "0.1.0",
       id: "scan_job_state",
       states: ["queued", "running"],
+      entryStates: [],
       terminalStates: [],
       transitions: [{ from: "queued", to: "running" }],
     } as const;
@@ -793,11 +813,12 @@ describe("App", () => {
 
   it("generates focused workflow Mermaid source with dotted non-bucket states", () => {
     const definition = {
-      schemaVersion: "0.2.0",
+      schemaVersion: "0.3.0",
       appName: "Example Project",
       definitionVersion: "0.1.0",
       id: "scan_job_state",
       states: ["queued", "running", "completed"],
+      entryStates: [],
       terminalStates: ["completed"],
       transitions: [
         { from: "queued", to: "running" },
@@ -827,7 +848,7 @@ describe("App", () => {
     const focusedTerminalSource = buildWorkflowMermaidDiagram(definition, workflow, "light", ["completed"]);
 
     expect(defaultSource).toContain("queued -->|Start| running");
-    expect(defaultSource).toContain("class queued,running,completed state;");
+    expect(defaultSource).toContain("class queued,running state;");
     expect(defaultSource).toContain("class completed terminal;");
     expect(defaultSource).not.toContain("unfocusedState");
     expect(focusedSource).toContain("queued -->|Start| running");
@@ -897,19 +918,60 @@ describe("App", () => {
     await expectStateMachineAction(user, "Save State Machine and Workflow", false);
   });
 
-  it("adds states and terminal states through the editor", async () => {
+  it("adds states and entry and terminal states through the editor", async () => {
     const user = userEvent.setup();
     render(<App />);
+
+    expect(screen.getByRole("checkbox", { name: "queued entry" })).toBeChecked();
+    await user.click(screen.getByRole("checkbox", { name: "queued entry" }));
+    expect(screen.getByRole("checkbox", { name: "queued entry" })).not.toBeChecked();
 
     await user.click(screen.getByRole("button", { name: "Add State" }));
     const stateInput = screen.getByRole("textbox", { name: "State 6 ID" });
 
     await user.clear(stateInput);
     await user.type(stateInput, "archived");
+    await user.click(screen.getByRole("checkbox", { name: "archived entry" }));
     await user.click(screen.getByRole("checkbox", { name: "archived terminal" }));
 
     expect(stateInput).toHaveValue("archived");
+    expect(screen.getByRole("checkbox", { name: "archived entry" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "archived terminal" })).toBeChecked();
+  });
+
+  it("retargets and removes entry states when state IDs change", async () => {
+    const user = userEvent.setup();
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const showSaveFilePicker = vi.fn().mockResolvedValue({
+      createWritable: vi.fn().mockResolvedValue({ write, close }),
+    });
+
+    (
+      window as Window & {
+        showSaveFilePicker?: typeof showSaveFilePicker;
+      }
+    ).showSaveFilePicker = showSaveFilePicker;
+
+    render(<App />);
+
+    const queuedInput = screen.getByRole("textbox", { name: "State 1 ID" });
+    await user.clear(queuedInput);
+    await user.type(queuedInput, "inbox");
+
+    await clickStateMachineAction(user, "Export State Machine");
+    await waitFor(() => {
+      expect(write).toHaveBeenCalledTimes(1);
+    });
+    expect(JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob)).entryStates).toEqual(["inbox"]);
+
+    const inboxRow = screen.getByRole("listitem", { name: "inbox state row" });
+    await user.click(within(inboxRow).getByRole("button", { name: "Remove" }));
+    await clickStateMachineAction(user, "Export State Machine");
+    await waitFor(() => {
+      expect(write).toHaveBeenCalledTimes(2);
+    });
+    expect(JSON.parse(await readBlobText(write.mock.calls[1][0] as Blob)).entryStates).toEqual([]);
   });
 
   it("reorders states by dragging from one row to another", () => {
@@ -1008,7 +1070,17 @@ describe("App", () => {
     expect(screen.getByLabelText("Target App")).toHaveValue("Article Manager");
     expect(screen.getByLabelText("State Machine Version")).toHaveValue("1.2.3");
     expect(screen.getByRole("textbox", { name: "State 1 ID" })).toHaveValue("draft");
+    expect(screen.getByRole("checkbox", { name: "draft entry" })).not.toBeChecked();
     expect(screen.getByText("Valid")).toBeInTheDocument();
+
+    await clickStateMachineAction(user, "Export State Machine");
+    await waitFor(() => {
+      expect(write).toHaveBeenCalledTimes(1);
+    });
+    const stateMachineExport = JSON.parse(await readBlobText(write.mock.calls[0][0]));
+
+    expect(stateMachineExport.schemaVersion).toBe("0.3.0");
+    expect(stateMachineExport.entryStates).toEqual([]);
 
     await user.click(screen.getByRole("button", { name: "Workflow" }));
 
@@ -1018,8 +1090,11 @@ describe("App", () => {
     await expectWorkflowAction(user, "Export Workflow", true);
 
     await clickWorkflowAction(user, "Export Workflow");
+    await waitFor(() => {
+      expect(write).toHaveBeenCalledTimes(2);
+    });
 
-    const workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0]));
+    const workflowExport = JSON.parse(await readBlobText(write.mock.calls[1][0]));
 
     expect(workflowExport.states.map((state: { id: string }) => state.id)).toEqual(["draft", "published"]);
     expect(workflowExport.actions).toEqual([]);
@@ -1260,7 +1335,9 @@ describe("App", () => {
 
     const exported = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
 
+    expect(exported.schemaVersion).toBe("0.3.0");
     expect(exported.states).toEqual(["queued", "failed", "running", "completed", "cancelled"]);
+    expect(exported.entryStates).toEqual(["queued"]);
     expect(exported.terminalStates).toEqual(["completed", "cancelled"]);
     expect(exported.transitions).toContainEqual({ from: "queued", to: "running" });
     expect(exported.transitions).toContainEqual({ from: "running", to: "failed" });
@@ -1782,7 +1859,9 @@ describe("App", () => {
     await waitFor(async () => {
       const source = await getLastRenderedMermaidSource();
 
-      expect(source).toContain("class queued,running,completed,failed,cancelled state;");
+      expect(source).toContain("class running,failed state;");
+      expect(source).toContain("class completed,cancelled terminal;");
+      expect(source).toContain("class queued entry;");
       expect(source).not.toContain("unfocusedState");
     });
 
@@ -1791,7 +1870,7 @@ describe("App", () => {
     await waitFor(async () => {
       const source = await getLastRenderedMermaidSource();
 
-      expect(source).toContain("class queued state;");
+      expect(source).toContain("class queued entry;");
       expect(source).toContain("class running,failed unfocusedState;");
       expect(source).toContain("class completed,cancelled unfocusedTerminal;");
     });
@@ -1801,7 +1880,9 @@ describe("App", () => {
     await waitFor(async () => {
       const source = await getLastRenderedMermaidSource();
 
-      expect(source).toContain("class queued,running,completed,failed,cancelled state;");
+      expect(source).toContain("class running,failed state;");
+      expect(source).toContain("class completed,cancelled terminal;");
+      expect(source).toContain("class queued entry;");
       expect(source).not.toContain("unfocusedState");
     });
   });
