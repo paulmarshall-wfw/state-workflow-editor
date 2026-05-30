@@ -2910,6 +2910,8 @@ function WorkflowLifecycleList({
                 <div className="lifecycle-hook-list" role="list" aria-label={`${lifecyclePhaseLabels[phase]} hooks`}>
                   {phaseHooks.map((hook) => {
                     const hasIssue = isLifecycleHookInvalid(hook, hooks, actions, states, terminalStates);
+                    const targetLabel = formatLifecycleTargetLabel(hook, actions);
+                    const handlerLabel = hook.handlerKey || "No main handler";
 
                     return (
                       <button
@@ -2917,11 +2919,10 @@ function WorkflowLifecycleList({
                         type="button"
                         className={hook.id === selectedHookId ? "lifecycle-hook-row selected" : "lifecycle-hook-row"}
                         onClick={() => onSelect(hook.id)}
+                        title={`${targetLabel}: ${handlerLabel}`}
                       >
-                        <span className="lifecycle-hook-target">
-                          {formatLifecycleTargetLabel(hook, actions)}
-                        </span>
-                        <span className="lifecycle-hook-handler">{hook.handlerKey || "No main handler"}</span>
+                        <span className="lifecycle-hook-target">{targetLabel}</span>
+                        <span className="lifecycle-hook-handler">{handlerLabel}</span>
                         <span className={hasIssue ? "status error" : "status ok"}>{hasIssue ? "Issue" : "Valid"}</span>
                       </button>
                     );

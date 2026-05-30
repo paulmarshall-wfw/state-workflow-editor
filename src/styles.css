@@ -937,19 +937,18 @@ button:focus-visible {
 .lifecycle-phase-section {
   display: grid;
   grid-template-rows: auto auto;
-  gap: 6px;
+  gap: 8px;
   align-content: start;
   border: 1px solid var(--border-subtle);
   border-radius: 7px;
   background: var(--surface-muted);
-  padding: 6px;
+  padding: 8px;
 }
 
 .lifecycle-phase-heading {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, auto);
-  gap: 6px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
 }
 
 .lifecycle-phase-heading h3 {
@@ -958,6 +957,7 @@ button:focus-visible {
   align-items: baseline;
   margin: 0;
   font-size: 0.88rem;
+  line-height: 1.2;
 }
 
 .lifecycle-phase-heading span {
@@ -981,17 +981,19 @@ button:focus-visible {
 .lifecycle-hook-row {
   display: grid;
   width: 100%;
-  grid-template-columns: minmax(110px, 1fr) minmax(120px, 1fr) auto;
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "target status"
+    "handler status";
+  gap: 3px 8px;
   align-items: center;
   border: 1px solid var(--border-subtle);
   border-radius: 7px;
   background: var(--surface-bg);
   color: var(--text-primary);
   box-sizing: border-box;
-  height: 30px;
-  min-height: 30px;
-  padding: 0 8px;
+  min-height: 46px;
+  padding: 6px 8px;
   text-align: left;
 }
 
@@ -1002,19 +1004,27 @@ button:focus-visible {
 
 .lifecycle-hook-target,
 .lifecycle-hook-handler {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .lifecycle-hook-target {
+  grid-area: target;
   font-weight: 850;
 }
 
 .lifecycle-hook-handler {
+  grid-area: handler;
   color: var(--text-muted);
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.lifecycle-hook-row .status {
+  grid-area: status;
+  justify-self: end;
 }
 
 .lifecycle-editor-form {
