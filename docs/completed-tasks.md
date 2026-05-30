@@ -13,3 +13,13 @@ Append brief entries here when project work is completed. Keep this file concise
   Outcome: Lifecycle phase controls now stack cleanly, and hook rows show target, handler, and status in a readable two-line layout.
   Verification: `npm run lint`, `npm run test`, `npm run build`, and Chrome visual check at `http://127.0.0.1:5174/` passed; existing React `act(...)` warning and Vite chunk-size warning remain.
   Traceability: `main` at `b4bc65d`; changed `src/App.tsx` and `src/styles.css`.
+
+- Task: Fix ambiguous workflow Mermaid labels for duplicate action names
+  Outcome: Workflow Mermaid previews now keep duplicate action labels distinct by appending action IDs only when labels collide, preserving readability for unique labels.
+  Verification: `npm test` and `npm run lint` passed; existing React `act(...)` warning remains during tests.
+  Traceability: `main` at `74c6252`; changed `src/App.tsx` and `src/App.test.tsx`.
+
+- Task: Repair Mermaid workflow preview rendering after duplicate-label fix
+  Outcome: Workflow edge labels are now emitted as quoted Mermaid text, so disambiguated labels like `Cancel (cancel_queued)` render correctly instead of breaking the preview.
+  Verification: `npm test` and `npm run lint` passed; manual Chrome reload confirmed the workflow diagram renders again at `http://127.0.0.1:5174/`; existing React `act(...)` warning remains during tests.
+  Traceability: `main` at `74c6252`; changed `src/App.tsx` and `src/App.test.tsx`.

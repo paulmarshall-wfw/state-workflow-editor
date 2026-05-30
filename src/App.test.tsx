@@ -806,9 +806,9 @@ describe("App", () => {
     const horizontalSource = buildWorkflowMermaidDiagram(definition, workflow, "light", undefined, "horizontal");
 
     expect(source).toContain("flowchart TD");
-    expect(source).toContain("queued -->|Start| running");
+    expect(source).toContain('queued -->|"Start"| running');
     expect(horizontalSource).toContain("flowchart LR");
-    expect(horizontalSource).toContain("queued -->|Start| running");
+    expect(horizontalSource).toContain('queued -->|"Start"| running');
   });
 
   it("generates focused workflow Mermaid source with dotted non-bucket states", () => {
@@ -847,17 +847,56 @@ describe("App", () => {
     const focusedSource = buildWorkflowMermaidDiagram(definition, workflow, "light", ["queued"]);
     const focusedTerminalSource = buildWorkflowMermaidDiagram(definition, workflow, "light", ["completed"]);
 
-    expect(defaultSource).toContain("queued -->|Start| running");
+    expect(defaultSource).toContain('queued -->|"Start"| running');
     expect(defaultSource).toContain("class queued,running state;");
     expect(defaultSource).toContain("class completed terminal;");
     expect(defaultSource).not.toContain("unfocusedState");
-    expect(focusedSource).toContain("queued -->|Start| running");
+    expect(focusedSource).toContain('queued -->|"Start"| running');
     expect(focusedSource).toContain("class queued state;");
     expect(focusedSource).toContain("class running unfocusedState;");
     expect(focusedSource).toContain("class completed unfocusedTerminal;");
     expect(focusedSource).toContain("stroke-dasharray:2 3");
     expect(focusedTerminalSource).toContain("class completed terminal;");
     expect(focusedTerminalSource).toContain("class queued,running unfocusedState;");
+  });
+
+  it("includes action IDs in workflow Mermaid labels when labels collide", () => {
+    const definition = {
+      schemaVersion: "0.3.0",
+      appName: "Example Project",
+      definitionVersion: "0.1.0",
+      id: "scan_job_state",
+      states: ["queued", "running", "cancelled"],
+      entryStates: ["queued"],
+      terminalStates: ["cancelled"],
+      transitions: [
+        { from: "queued", to: "cancelled" },
+        { from: "running", to: "cancelled" },
+      ],
+    } as const;
+    const workflow = {
+      schemaVersion: "0.7.0",
+      appName: "Example Project",
+      workflowVersion: "0.1.0",
+      id: "scan_job_workflow",
+      stateMachine: { id: "scan_job_state", definitionVersion: "0.1.0" },
+      states: [
+        { id: "queued", visible: true },
+        { id: "running", visible: true },
+        { id: "cancelled", visible: true },
+      ],
+      actions: [
+        { id: "cancel_queued", label: "Cancel", from: "queued", to: "cancelled", trigger: "user", visible: true },
+        { id: "cancel_running", label: "Cancel", from: "running", to: "cancelled", trigger: "user", visible: true },
+      ],
+      buckets: [],
+      hooks: [],
+    } as const;
+
+    const source = buildWorkflowMermaidDiagram(definition, workflow, "light");
+
+    expect(source).toContain('queued -->|"Cancel (cancel_queued)"| cancelled');
+    expect(source).toContain('running -->|"Cancel (cancel_running)"| cancelled');
   });
 
   it("toggles and persists light and dark mode from the icon beside the app name", async () => {

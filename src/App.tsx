@@ -3897,6 +3897,25 @@ function formatActionDisplayLabel(action: WorkflowAction<string>) {
   return label === action.id ? action.id : `${label} (${action.id})`;
 }
 
+function formatWorkflowMermaidActionLabel(
+  action: WorkflowAction<string>,
+  labelCounts: ReadonlyMap<string, number>,
+) {
+  const label = action.label.trim() || action.id;
+
+  return (labelCounts.get(label) ?? 0) > 1 ? formatActionDisplayLabel(action) : label;
+}
+
+function countLabels(values: readonly string[]) {
+  const counts = new Map<string, number>();
+
+  for (const value of values) {
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  return counts;
+}
+
 function isWorkflowIdentifier(value: string) {
   return /^[a-z][a-z0-9_]*$/.test(value);
 }
@@ -4550,13 +4569,16 @@ export function buildWorkflowMermaidDiagram(
   const focusStateSet = new Set(focusStateIds ?? []);
   const entryStateSet = new Set(machine.entryStates);
   const terminalStateSet = new Set(machine.terminalStates);
+  const actionLabelCounts = countLabels(workflow.actions.map((action) => action.label.trim() || action.id));
 
   for (const state of machine.states) {
     lines.push(`  ${state}["${state}"]`);
   }
 
   for (const action of workflow.actions) {
-    lines.push(`  ${action.from} -->|${escapeMermaidLabel(action.label || action.id)}| ${action.to}`);
+    lines.push(
+      `  ${action.from} -->|${quoteMermaidEdgeLabel(formatWorkflowMermaidActionLabel(action, actionLabelCounts))}| ${action.to}`,
+    );
   }
 
   if (machine.states.length > 0 && !isFocusedPreview) {
@@ -4672,6 +4694,10 @@ export function buildWorkflowMermaidDiagram(
 
 function escapeMermaidLabel(label: string) {
   return label.replace(/\|/g, "/");
+}
+
+function quoteMermaidEdgeLabel(label: string) {
+  return `"${escapeMermaidLabel(label).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 function getMermaidFlowchartDeclaration(diagramDirection: DiagramDirection) {
