@@ -101,6 +101,43 @@ describe("workflow definition validation", () => {
     );
   });
 
+  it("accepts semantic dotted action IDs", () => {
+    const result = validateWorkflowDefinition(
+      {
+        ...workflow,
+        actions: [
+          { id: "ingestion.promote_to_memo", label: "Promote", from: "queued", to: "running", trigger: "user", visible: true },
+          { id: "memo.accept", label: "Accept", from: "running", to: "completed", trigger: "user", visible: true },
+          { id: "accepted.reopen_as_memo", label: "Reopen", from: "failed", to: "queued", trigger: "user", visible: true },
+        ],
+      },
+      stateMachine,
+    );
+
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects malformed dotted action IDs", () => {
+    const invalidIds = ["Bad.Action", "bad action", ".bad", "bad.", "bad..action"];
+
+    const result = validateWorkflowDefinition(
+      {
+        ...workflow,
+        actions: invalidIds.map((id) => ({
+          id,
+          label: "Invalid",
+          from: "queued",
+          to: "running",
+          trigger: "user",
+          visible: true,
+        })),
+      },
+      stateMachine,
+    );
+
+    expect(result.errors.filter((error) => error.code === "invalid_action_id")).toHaveLength(invalidIds.length);
+  });
+
   it("rejects duplicate and invalid workflow bucket IDs", () => {
     const result = validateWorkflowDefinition(
       {
@@ -287,7 +324,7 @@ describe("workflow definition validation", () => {
     expect(hiddenBucketResult.valid).toBe(true);
   });
 
-  it("accepts lifecycle hooks and rejects invalid handler keys", () => {
+  it("accepts lifecycle hooks and keeps hook IDs and handler keys snake_case", () => {
     const validResult = validateWorkflowDefinition(
       {
         ...workflow,
@@ -310,7 +347,7 @@ describe("workflow definition validation", () => {
         ...workflow,
         hooks: [
           {
-            id: "start_processing",
+            id: "start.processing",
             phase: "before_transition",
             targetType: "action",
             targetId: "start",
@@ -322,7 +359,9 @@ describe("workflow definition validation", () => {
     );
 
     expect(validResult.valid).toBe(true);
-    expect(invalidResult.errors.map((error) => error.code)).toContain("invalid_handler_key");
+    expect(invalidResult.errors.map((error) => error.code)).toEqual(
+      expect.arrayContaining(["invalid_hook_id", "invalid_handler_key"]),
+    );
   });
 
   it("rejects lifecycle hooks with duplicate or unknown targets", () => {

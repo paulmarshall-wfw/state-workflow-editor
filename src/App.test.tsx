@@ -251,6 +251,12 @@ function getWorkflowActionLabelValues() {
     .map((input) => (input as HTMLInputElement).value);
 }
 
+function getWorkflowActionIdValues() {
+  return screen
+    .getAllByRole("textbox", { name: /^Action \d+ ID$/ })
+    .map((input) => (input as HTMLInputElement).value);
+}
+
 function getWorkflowBucketLabelValues() {
   return screen
     .getAllByRole("textbox", { name: /^Bucket \d+ label$/ })
@@ -490,7 +496,7 @@ describe("App", () => {
     expect(screen.getByTitle(workflowRecord.savedAt)).toHaveTextContent(`Saved ${formattedWorkflowSavedAt}`);
   });
 
-  it("upgrades saved current draft and Library workflows from schema 0.5.0 when loading", async () => {
+  it("upgrades saved current draft and Library workflows from schema 0.6.0 when loading", async () => {
     const fakeIndexedDb = createFakeIndexedDb();
     const savedAt = "2026-05-28T00:00:00.000Z";
     const definition = {
@@ -513,7 +519,7 @@ describe("App", () => {
       id: "draft_workflow",
       stateMachine: { id: "scan_job_state", definitionVersion: "0.1.0" },
       states: definition.states.map((state) => ({ id: state, visible: true })),
-      actions: [{ id: "start", label: "Start", from: "queued", to: "running", trigger: "user", visible: true }],
+      actions: [{ id: "scan.start", label: "Start", from: "queued", to: "running", trigger: "user", visible: true }],
       buckets: [],
       hooks: [
         {
@@ -583,7 +589,7 @@ describe("App", () => {
     await clickWorkflowAction(user, "Export Workflow");
     let workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
 
-    expect(workflowExport.schemaVersion).toBe("0.6.0");
+    expect(workflowExport.schemaVersion).toBe("0.7.0");
     expect(workflowExport.id).toBe("draft_workflow");
 
     await user.click(screen.getByRole("button", { name: "Library" }));
@@ -596,7 +602,7 @@ describe("App", () => {
     await clickWorkflowAction(user, "Export Workflow");
     workflowExport = JSON.parse(await readBlobText(write.mock.calls[1][0] as Blob));
 
-    expect(workflowExport.schemaVersion).toBe("0.6.0");
+    expect(workflowExport.schemaVersion).toBe("0.7.0");
     expect(workflowExport.id).toBe("library_workflow");
   });
 
@@ -763,7 +769,7 @@ describe("App", () => {
       transitions: [{ from: "queued", to: "running" }],
     } as const;
     const workflow = {
-      schemaVersion: "0.6.0",
+      schemaVersion: "0.7.0",
       appName: "Example Project",
       workflowVersion: "0.1.0",
       id: "scan_job_workflow",
@@ -780,9 +786,9 @@ describe("App", () => {
     const horizontalSource = buildWorkflowMermaidDiagram(definition, workflow, "light", undefined, "horizontal");
 
     expect(source).toContain("flowchart TD");
-    expect(source).toContain("queued -->|start| running");
+    expect(source).toContain("queued -->|Start| running");
     expect(horizontalSource).toContain("flowchart LR");
-    expect(horizontalSource).toContain("queued -->|start| running");
+    expect(horizontalSource).toContain("queued -->|Start| running");
   });
 
   it("generates focused workflow Mermaid source with dotted non-bucket states", () => {
@@ -799,7 +805,7 @@ describe("App", () => {
       ],
     } as const;
     const workflow = {
-      schemaVersion: "0.6.0",
+      schemaVersion: "0.7.0",
       appName: "Example Project",
       workflowVersion: "0.1.0",
       id: "scan_job_workflow",
@@ -810,8 +816,8 @@ describe("App", () => {
         { id: "completed", visible: true },
       ],
       actions: [
-        { id: "start", label: "Start", from: "queued", to: "running", trigger: "user", visible: true },
-        { id: "complete", label: "Complete", from: "running", to: "completed", trigger: "user", visible: true },
+        { id: "scan.start", label: "Start", from: "queued", to: "running", trigger: "user", visible: true },
+        { id: "scan.complete", label: "Complete", from: "running", to: "completed", trigger: "user", visible: true },
       ],
       buckets: [{ id: "waiting", label: "Waiting", visible: true, states: ["queued"] }],
       hooks: [],
@@ -820,11 +826,11 @@ describe("App", () => {
     const focusedSource = buildWorkflowMermaidDiagram(definition, workflow, "light", ["queued"]);
     const focusedTerminalSource = buildWorkflowMermaidDiagram(definition, workflow, "light", ["completed"]);
 
-    expect(defaultSource).toContain("queued -->|start| running");
+    expect(defaultSource).toContain("queued -->|Start| running");
     expect(defaultSource).toContain("class queued,running,completed state;");
     expect(defaultSource).toContain("class completed terminal;");
     expect(defaultSource).not.toContain("unfocusedState");
-    expect(focusedSource).toContain("queued -->|start| running");
+    expect(focusedSource).toContain("queued -->|Start| running");
     expect(focusedSource).toContain("class queued state;");
     expect(focusedSource).toContain("class running unfocusedState;");
     expect(focusedSource).toContain("class completed unfocusedTerminal;");
@@ -1449,18 +1455,29 @@ describe("App", () => {
     expect(screen.getByLabelText("Workflow ID")).toHaveValue("scan_job_workflow");
     expect(screen.getByLabelText("State Machine")).toHaveValue("scan_job_state@0.1.0");
     expect(screen.getByLabelText("Selected State")).toHaveValue("queued");
+    expect(screen.getByText("Action ID")).toBeInTheDocument();
     expect(screen.getByText("Button Label")).toBeInTheDocument();
     expect(screen.getByText("From State")).toBeInTheDocument();
     expect(screen.getByText("To State")).toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "Action 1 ID" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Action 1 ID" })).toHaveValue("start");
     expect(screen.getByRole("img", { name: "Workflow Mermaid preview" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Add Action" }));
+    const actionIdInput = screen.getByRole("textbox", { name: "Action 7 ID" });
     const actionInput = screen.getByRole("textbox", { name: "Action 7 label" });
+
+    expect(actionIdInput).toHaveValue("action_7");
 
     await user.clear(actionInput);
     await user.type(actionInput, "Pause");
 
+    expect(actionInput).toHaveValue("Pause");
+    expect(actionIdInput).toHaveValue("action_7");
+
+    await user.clear(actionIdInput);
+    await user.type(actionIdInput, "queued.pause");
+
+    expect(actionIdInput).toHaveValue("queued.pause");
     expect(actionInput).toHaveValue("Pause");
   });
 
@@ -1504,6 +1521,7 @@ describe("App", () => {
       "Workflow actions already exist. Add all actions will overwrite existing actions. Continue?",
     );
     expect(screen.getByText("Added 6 workflow actions from state-machine transitions.")).toBeInTheDocument();
+    expect(getWorkflowActionIdValues()).toEqual(["queued.to_running", "queued.to_cancelled"]);
     expect(getWorkflowActionLabelValues()).toEqual(["Queued to Running", "Queued to Cancelled"]);
 
     await user.selectOptions(screen.getByLabelText("Selected State"), "running");
@@ -1512,6 +1530,11 @@ describe("App", () => {
       "Running to Completed",
       "Running to Failed",
       "Running to Cancelled",
+    ]);
+    expect(getWorkflowActionIdValues()).toEqual([
+      "running.to_completed",
+      "running.to_failed",
+      "running.to_cancelled",
     ]);
 
     await user.selectOptions(screen.getByLabelText("Selected State"), "failed");
@@ -1526,7 +1549,7 @@ describe("App", () => {
 
     expect(workflowExport.actions).toEqual([
       {
-        id: "queued_to_running",
+        id: "queued.to_running",
         label: "Queued to Running",
         from: "queued",
         to: "running",
@@ -1534,7 +1557,7 @@ describe("App", () => {
         visible: true,
       },
       {
-        id: "running_to_completed",
+        id: "running.to_completed",
         label: "Running to Completed",
         from: "running",
         to: "completed",
@@ -1542,7 +1565,7 @@ describe("App", () => {
         visible: true,
       },
       {
-        id: "running_to_failed",
+        id: "running.to_failed",
         label: "Running to Failed",
         from: "running",
         to: "failed",
@@ -1550,7 +1573,7 @@ describe("App", () => {
         visible: true,
       },
       {
-        id: "failed_to_queued",
+        id: "failed.to_queued",
         label: "Failed to Queued",
         from: "failed",
         to: "queued",
@@ -1558,7 +1581,7 @@ describe("App", () => {
         visible: true,
       },
       {
-        id: "queued_to_cancelled",
+        id: "queued.to_cancelled",
         label: "Queued to Cancelled",
         from: "queued",
         to: "cancelled",
@@ -1566,7 +1589,7 @@ describe("App", () => {
         visible: true,
       },
       {
-        id: "running_to_cancelled",
+        id: "running.to_cancelled",
         label: "Running to Cancelled",
         from: "running",
         to: "cancelled",
@@ -1638,12 +1661,12 @@ describe("App", () => {
     const workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
 
     expect(workflowExport.actions.map((action: { id: string }) => action.id)).toEqual([
-      "queued_to_running",
-      "running_to_completed",
-      "running_to_failed",
-      "failed_to_queued",
-      "queued_to_cancelled",
-      "running_to_cancelled",
+      "queued.to_running",
+      "running.to_completed",
+      "running.to_failed",
+      "failed.to_queued",
+      "queued.to_cancelled",
+      "running.to_cancelled",
     ]);
     expect(workflowExport.hooks).toEqual([
       {
@@ -1871,12 +1894,12 @@ describe("App", () => {
     const beforeTransitionTarget = screen.getByLabelText("Before Transition target") as HTMLSelectElement;
 
     expect(Array.from(beforeTransitionTarget.options).map((option) => option.textContent)).toEqual([
-      "start",
-      "complete",
-      "fail",
-      "retry",
-      "cancel_queued",
-      "cancel_running",
+      "Start (start)",
+      "Complete (complete)",
+      "Fail (fail)",
+      "Retry (retry)",
+      "Cancel (cancel_queued)",
+      "Cancel (cancel_running)",
     ]);
 
     await user.selectOptions(screen.getByLabelText("Before Transition target"), "start");
@@ -1884,8 +1907,7 @@ describe("App", () => {
 
     expect(screen.getByLabelText("Phase")).toHaveValue("Before Transition");
     expect(screen.getByLabelText("Target")).toHaveValue("start");
-    expect(screen.getByRole("button", { name: /start No main handler Valid/ })).toBeInTheDocument();
-    expect(screen.queryByText("Start (start)")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Start \(start\) No main handler Valid/ })).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Main Handler Key"), "run_start");
     await user.type(screen.getByLabelText("Success Handler Key"), "start_ok");
@@ -1932,6 +1954,21 @@ describe("App", () => {
 
     expect(screen.getByRole("button", { name: "Lifecycle" })).toHaveClass("active");
     expect(screen.getByLabelText("Main Handler Key")).toHaveValue("run_start");
+
+    await user.click(getWorkflowActionsTab());
+    const actionIdInput = screen.getByRole("textbox", { name: "Action 1 ID" });
+
+    await user.clear(actionIdInput);
+    await user.type(actionIdInput, "scan.start");
+    await user.click(screen.getByRole("button", { name: "Lifecycle" }));
+
+    expect(screen.getByLabelText("Target")).toHaveValue("scan.start");
+
+    await clickWorkflowAction(user, "Export Workflow");
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(3));
+    const retargetedExport = JSON.parse(await readBlobText(write.mock.calls[2][0] as Blob));
+
+    expect(retargetedExport.hooks[0].targetId).toBe("scan.start");
   });
 
   it("adds scheduled while-in-state lifecycle hooks and exports retry settings", async () => {
@@ -1982,7 +2019,7 @@ describe("App", () => {
     await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
     const workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
 
-    expect(workflowExport.schemaVersion).toBe("0.6.0");
+    expect(workflowExport.schemaVersion).toBe("0.7.0");
     expect(workflowExport.hooks).toEqual([
       {
         id: "while_in_state_failed",
@@ -2026,7 +2063,7 @@ describe("App", () => {
     render(<App />);
 
     const json = JSON.stringify({
-      schemaVersion: "0.6.0",
+      schemaVersion: "0.7.0",
       appName: "Article Manager",
       workflowVersion: "1.0.0",
       id: "article_workflow",
@@ -2320,7 +2357,7 @@ describe("App", () => {
     const linkedExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
     const bundledExport = JSON.parse(await readBlobText(write.mock.calls[1][0] as Blob));
 
-    expect(linkedExport.schemaVersion).toBe("0.6.0");
+    expect(linkedExport.schemaVersion).toBe("0.7.0");
     expect(linkedExport.states).toEqual([
       { id: "queued", visible: true },
       { id: "running", visible: true },
@@ -2495,7 +2532,7 @@ describe("App", () => {
     render(<App />);
 
     const json = JSON.stringify({
-      schemaVersion: "0.6.0",
+      schemaVersion: "0.7.0",
       appName: "Article Manager",
       workflowVersion: "1.0.0",
       id: "article_workflow",

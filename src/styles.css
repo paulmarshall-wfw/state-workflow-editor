@@ -815,9 +815,9 @@ button:focus-visible {
 .workflow-action-header {
   display: grid;
   grid-template-areas:
-    "spacer label from to action"
-    "spacer trigger visible lifecycle lifecycle";
-  grid-template-columns: 30px minmax(150px, 1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) auto;
+    "spacer id label from to action"
+    "spacer trigger trigger visible lifecycle lifecycle";
+  grid-template-columns: 30px minmax(150px, 1fr) minmax(140px, 0.95fr) minmax(120px, 0.75fr) minmax(120px, 0.75fr) auto;
   gap: 6px 8px;
   padding: 0 8px;
   color: var(--text-muted);
@@ -829,9 +829,9 @@ button:focus-visible {
 .workflow-action-row {
   display: grid;
   grid-template-areas:
-    "drag label from to remove"
-    "drag trigger visible lifecycle lifecycle";
-  grid-template-columns: 30px minmax(150px, 1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) auto;
+    "drag id label from to remove"
+    "drag trigger trigger visible lifecycle lifecycle";
+  grid-template-columns: 30px minmax(150px, 1fr) minmax(140px, 0.95fr) minmax(120px, 0.75fr) minmax(120px, 0.75fr) auto;
   gap: 8px;
   align-items: center;
   border: 1px solid var(--border-subtle);
@@ -842,6 +842,11 @@ button:focus-visible {
 
 .workflow-action-header-spacer {
   grid-area: spacer;
+}
+
+.workflow-action-header-id,
+.workflow-action-id-input {
+  grid-area: id;
 }
 
 .workflow-action-header-label,

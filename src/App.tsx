@@ -665,7 +665,7 @@ export function App() {
     );
   }
 
-  function updateWorkflowAction(index: number, field: "label" | "from" | "to", value: string) {
+  function updateWorkflowAction(index: number, field: "id" | "label" | "from" | "to", value: string) {
     setWorkflow((current) => ({
       ...current,
       actions: current.actions.map((action, actionIndex) => {
@@ -673,26 +673,15 @@ export function App() {
           return action;
         }
 
-        if (field === "label") {
-          const nextId = value.trim() ? uniqueActionIdFromLabel(value, current.actions, index) : action.id;
-
-          return {
-            ...action,
-            label: value,
-            id: nextId,
-          };
-        }
-
         return { ...action, [field]: value };
       }),
       hooks:
-        field === "label"
+        field === "id"
           ? current.hooks.map((hook) => {
               const action = current.actions[index];
-              const nextId = value.trim() ? uniqueActionIdFromLabel(value, current.actions, index) : action?.id;
 
               return action && hook.targetType === "action" && hook.targetId === action.id
-                ? { ...hook, targetId: nextId ?? hook.targetId }
+                ? { ...hook, targetId: value }
                 : hook;
             })
           : current.hooks,
@@ -2050,6 +2039,7 @@ export function App() {
                     </div>
                     <div className="workflow-action-header" aria-hidden="true">
                       <span className="workflow-action-header-spacer" />
+                      <span className="workflow-action-header-id">Action ID</span>
                       <span className="workflow-action-header-label">Button Label</span>
                       <span className="workflow-action-header-from">From State</span>
                       <span className="workflow-action-header-to">To State</span>
@@ -3155,7 +3145,7 @@ function WorkflowActionList({
   hooks: WorkflowLifecycleHookWithIndex[];
   selectedState: string;
   states: string[];
-  onChange: (index: number, field: "label" | "from" | "to", value: string) => void;
+  onChange: (index: number, field: "id" | "label" | "from" | "to", value: string) => void;
   onTriggerChange: (index: number, trigger: WorkflowActionTrigger) => void;
   onVisibleChange: (index: number, visible: boolean) => void;
   onSelectLifecycleHook: (actionId: string) => void;
@@ -3249,6 +3239,13 @@ function WorkflowActionList({
                 <span />
               </span>
             </button>
+            <input
+              className="workflow-action-id-input"
+              aria-label={`Action ${action.index + 1} ID`}
+              value={action.id}
+              onChange={(event) => onChange(action.index, "id", event.target.value)}
+              spellCheck={false}
+            />
             <input
               className="workflow-action-label-input"
               aria-label={`Action ${action.index + 1} label`}
@@ -3752,25 +3749,6 @@ function nextUniqueLifecycleHookId(
   return candidate;
 }
 
-function uniqueActionIdFromLabel(label: string, actions: readonly WorkflowAction<string>[], currentIndex: number) {
-  const baseId = actionIdFromLabel(label);
-  const existingIds = actions.map((action, index) => (index === currentIndex ? "" : action.id));
-
-  if (!existingIds.includes(baseId)) {
-    return baseId;
-  }
-
-  let suffix = 2;
-  let nextId = `${baseId}_${suffix}`;
-
-  while (existingIds.includes(nextId)) {
-    suffix += 1;
-    nextId = `${baseId}_${suffix}`;
-  }
-
-  return nextId;
-}
-
 function uniqueBucketIdFromLabel(label: string, buckets: readonly WorkflowBucket<string>[], currentIndex: number) {
   const baseId = actionIdFromLabel(label);
   const existingIds = buckets.map((bucket, index) => (index === currentIndex ? "" : bucket.id));
@@ -3793,16 +3771,9 @@ function uniqueBucketIdFromLabel(label: string, buckets: readonly WorkflowBucket
 function createWorkflowActionsFromTransitions(
   transitions: EditableDefinition["transitions"],
 ): WorkflowAction<string>[] {
-  const usedIds = new Set<string>();
-
   return transitions.map((transition) => {
-    const baseId = actionIdFromLabel(`${transition.from}_to_${transition.to}`);
-    const id = uniqueGeneratedActionId(baseId, usedIds);
-
-    usedIds.add(id);
-
     return {
-      id,
+      id: transitionActionId(transition.from, transition.to),
       label: formatTransitionActionLabel(transition.from, transition.to),
       from: transition.from,
       to: transition.to,
@@ -3812,20 +3783,8 @@ function createWorkflowActionsFromTransitions(
   });
 }
 
-function uniqueGeneratedActionId(baseId: string, usedIds: ReadonlySet<string>) {
-  if (!usedIds.has(baseId)) {
-    return baseId;
-  }
-
-  let suffix = 2;
-  let candidate = `${baseId}_${suffix}`;
-
-  while (usedIds.has(candidate)) {
-    suffix += 1;
-    candidate = `${baseId}_${suffix}`;
-  }
-
-  return candidate;
+function transitionActionId(from: string, to: string) {
+  return `${actionIdFromLabel(from)}.to_${actionIdFromLabel(to)}`;
 }
 
 function actionIdFromLabel(label: string) {
@@ -3861,7 +3820,7 @@ function getLifecycleTargetOptions(
   terminalStates: readonly string[],
 ) {
   if (phase === "before_transition") {
-    return actions.map((action) => ({ id: action.id, label: action.id }));
+    return actions.map((action) => ({ id: action.id, label: formatActionDisplayLabel(action) }));
   }
 
   const targetStates = phase === "on_terminal_entry" ? terminalStates : states;
@@ -3893,10 +3852,16 @@ function formatLifecycleTargetLabel(hook: WorkflowLifecycleHook<string>, actions
   if (hook.targetType === "action") {
     const action = actions.find((candidate) => candidate.id === hook.targetId);
 
-    return action?.id ?? hook.targetId;
+    return action ? formatActionDisplayLabel(action) : hook.targetId;
   }
 
   return hook.targetId;
+}
+
+function formatActionDisplayLabel(action: WorkflowAction<string>) {
+  const label = action.label.trim() || action.id;
+
+  return label === action.id ? action.id : `${label} (${action.id})`;
 }
 
 function isWorkflowIdentifier(value: string) {
@@ -4280,7 +4245,12 @@ function normalizeImportedWorkflowDefinition(
 }
 
 function normalizeImportedWorkflowSchemaVersion(schemaVersion: string | undefined): typeof WORKFLOW_SCHEMA_VERSION {
-  return (schemaVersion === "0.1.0" || schemaVersion === "0.2.0" || schemaVersion === "0.3.0" || schemaVersion === "0.4.0" || schemaVersion === "0.5.0"
+  return (schemaVersion === "0.1.0" ||
+    schemaVersion === "0.2.0" ||
+    schemaVersion === "0.3.0" ||
+    schemaVersion === "0.4.0" ||
+    schemaVersion === "0.5.0" ||
+    schemaVersion === "0.6.0"
     ? WORKFLOW_SCHEMA_VERSION
     : schemaVersion ?? WORKFLOW_SCHEMA_VERSION) as typeof WORKFLOW_SCHEMA_VERSION;
 }
@@ -4527,7 +4497,7 @@ export function buildWorkflowMermaidDiagram(
   }
 
   for (const action of workflow.actions) {
-    lines.push(`  ${action.from} -->|${escapeMermaidLabel(action.id)}| ${action.to}`);
+    lines.push(`  ${action.from} -->|${escapeMermaidLabel(action.label || action.id)}| ${action.to}`);
   }
 
   if (machine.states.length > 0 && !isFocusedPreview) {

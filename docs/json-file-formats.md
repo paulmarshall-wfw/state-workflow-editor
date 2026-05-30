@@ -5,8 +5,8 @@ This document defines the JSON files imported and exported by State Workflow Edi
 Current exported file-format versions:
 
 - State-machine definition: `schemaVersion: "0.2.0"`
-- Workflow definition: `schemaVersion: "0.6.0"`
-- Bundled workflow definition: `schemaVersion: "0.6.0"` plus `embeddedStateMachineDefinition`
+- Workflow definition: `schemaVersion: "0.7.0"`
+- Bundled workflow definition: `schemaVersion: "0.7.0"` plus `embeddedStateMachineDefinition`
 
 `schemaVersion` is the file-format version. `definitionVersion` and `workflowVersion` are user-controlled SemVer values for the authored definitions. They are separate from the app/package version in `package.json`.
 
@@ -79,7 +79,7 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
 
 ```json
 {
-  "schemaVersion": "0.6.0",
+  "schemaVersion": "0.7.0",
   "appName": "Example App",
   "workflowVersion": "0.1.0",
   "id": "scan_job_workflow",
@@ -96,7 +96,7 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
   ],
   "actions": [
     {
-      "id": "start",
+      "id": "scan.start",
       "label": "Start",
       "from": "queued",
       "to": "running",
@@ -104,7 +104,7 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
       "visible": true
     },
     {
-      "id": "fail",
+      "id": "scan.fail",
       "label": "Fail",
       "from": "running",
       "to": "failed",
@@ -131,7 +131,7 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
       "id": "before_transition_start",
       "phase": "before_transition",
       "targetType": "action",
-      "targetId": "start",
+      "targetId": "scan.start",
       "handlerKey": "start_scan",
       "onSuccess": { "handlerKey": "start_scan_success" },
       "onFailure": { "handlerKey": "start_scan_failure" }
@@ -160,13 +160,13 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `schemaVersion` | Yes | Must be `"0.6.0"` for current exports. |
+| `schemaVersion` | Yes | Must be `"0.7.0"` for current exports. |
 | `appName` | Yes | Human-facing target app/project name. |
 | `workflowVersion` | Yes | User-controlled SemVer for this workflow definition. |
 | `id` | Yes | Stable workflow definition ID. |
 | `stateMachine` | Yes | Linked state-machine reference. Its `id` and `definitionVersion` must match the loaded or embedded state-machine definition. |
 | `states` | Yes | One workflow presentation entry for every state in the linked state machine. |
-| `actions` | Yes | Named actions mapped to legal state-machine transitions. |
+| `actions` | Yes | Named actions mapped to legal state-machine transitions. Action `id` is the stable runtime/audit identifier; `label` is visible button text. |
 | `buckets` | Yes | Optional presentation groups. Exported as `[]` when no buckets exist. |
 | `hooks` | Yes | Optional lifecycle handler metadata. Exported as `[]` when no hooks exist. |
 
@@ -184,7 +184,7 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
 
 ```json
 {
-  "id": "start",
+  "id": "scan.start",
   "label": "Start",
   "from": "queued",
   "to": "running",
@@ -193,8 +193,10 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
 }
 ```
 
-- `id` must be unique and lowercase snake_case.
-- `label` is required.
+- `id` must be unique and use lowercase dotted identifier segments, such as `memo.accept` or `accepted.reopen_as_memo`.
+- `label` is required and is the visible button text.
+- Generated/default action IDs are starting points; edit them to semantic app-facing IDs before using them as durable runtime or audit identifiers.
+- Audit consumers should store the exact workflow action `id`, plus the previous state and new state.
 - `from` and `to` must exist in the linked state machine.
 - `from -> to` must be a legal state-machine transition.
 - Actions cannot start from terminal states.
@@ -298,7 +300,7 @@ A bundled workflow definition has the same workflow fields as a linked workflow 
 
 ```json
 {
-  "schemaVersion": "0.6.0",
+  "schemaVersion": "0.7.0",
   "appName": "Example App",
   "workflowVersion": "0.1.0",
   "id": "scan_job_workflow",
@@ -379,7 +381,7 @@ When a workflow is imported, it is reconciled to the effective state-machine def
 
 ### Legacy Workflow Imports
 
-The editor accepts workflow schema `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, and `0.5.0` imports and upgrades them in memory to current schema `0.6.0`. Browser-local Library workflows and current workspace drafts with those schema versions are also upgraded in memory when loaded. Loading an old saved record does not rewrite it; the upgraded schema is saved only when the user saves or duplicates the workflow.
+The editor accepts workflow schema `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, and `0.6.0` imports and upgrades them in memory to current schema `0.7.0`. Browser-local Library workflows and current workspace drafts with those schema versions are also upgraded in memory when loaded. Loading an old saved record does not rewrite it; the upgraded schema is saved only when the user saves or duplicates the workflow.
 
 Legacy normalization rules:
 
@@ -390,7 +392,8 @@ Legacy normalization rules:
 - missing `buckets` becomes `[]`
 - missing `hooks` becomes `[]`
 - legacy `action.processing.handlerKey` values become `before_transition` lifecycle hooks unless an explicit hook already exists for the same action
+- imported action IDs and labels are preserved exactly; label-derived suffix IDs such as `accept_2` are surfaced for manual correction rather than guessed automatically
 - imported hook `schedule` and `retryPolicy` objects are preserved closely enough for validation to report unsupported triggers, invalid durations, and invalid retry fields
 - missing schedules are not invented for imported `while_in_state` hooks; those hooks load visibly and block workflow export until the author chooses a valid schedule and handler key
 
-New exports always use workflow schema `0.6.0`, always omit action-level `processing`, and always include `buckets` and `hooks` arrays.
+New exports always use workflow schema `0.7.0`, always omit action-level `processing`, and always include `buckets` and `hooks` arrays.

@@ -7,7 +7,7 @@ import {
   validateStateMachineDefinition,
 } from "./stateMachine";
 
-export const WORKFLOW_SCHEMA_VERSION = "0.6.0" as const;
+export const WORKFLOW_SCHEMA_VERSION = "0.7.0" as const;
 
 export type WorkflowSchemaVersion = typeof WORKFLOW_SCHEMA_VERSION;
 
@@ -319,10 +319,10 @@ export function validateWorkflowDefinition<State extends string>(
   }
 
   workflow.actions.forEach((action, index) => {
-    if (!isValidWorkflowId(action.id)) {
+    if (!isValidWorkflowActionId(action.id)) {
       errors.push({
         code: "invalid_action_id",
-        message: `Action "${action.id}" must be a lowercase string literal using letters, numbers, and underscores.`,
+        message: `Action "${action.id}" must use lowercase dotted identifier segments such as memo.accept or accepted.reopen_as_memo.`,
         path: `actions.${index}.id`,
       });
     }
@@ -386,7 +386,7 @@ export function validateWorkflowDefinition<State extends string>(
   });
 
   workflow.buckets.forEach((bucket, bucketIndex) => {
-    if (!isValidWorkflowId(bucket.id)) {
+    if (!isValidWorkflowIdentifier(bucket.id)) {
       errors.push({
         code: "invalid_bucket_id",
         message: `Bucket "${bucket.id}" must be a lowercase string literal using letters, numbers, and underscores.`,
@@ -430,7 +430,7 @@ export function validateWorkflowDefinition<State extends string>(
   }
 
   workflow.hooks.forEach((hook, index) => {
-    if (!isValidWorkflowId(hook.id)) {
+    if (!isValidWorkflowIdentifier(hook.id)) {
       errors.push({
         code: "invalid_hook_id",
         message: `Lifecycle hook "${hook.id}" must be a lowercase string literal using letters, numbers, and underscores.`,
@@ -630,8 +630,12 @@ function copyLifecycleHook<State extends string>(hook: WorkflowLifecycleHook<Sta
   };
 }
 
-function isValidWorkflowId(actionId: string): boolean {
-  return /^[a-z][a-z0-9_]*$/.test(actionId);
+function isValidWorkflowActionId(actionId: string): boolean {
+  return /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/.test(actionId);
+}
+
+function isValidWorkflowIdentifier(identifier: string): boolean {
+  return /^[a-z][a-z0-9_]*$/.test(identifier);
 }
 
 function isValidLifecyclePhase(phase: string): phase is WorkflowLifecyclePhase {
@@ -653,7 +657,7 @@ function validateHandlerKey(
   hookId: string,
   errors: WorkflowValidationError[],
 ) {
-  if (handlerKey && !isValidWorkflowId(handlerKey)) {
+  if (handlerKey && !isValidWorkflowIdentifier(handlerKey)) {
     errors.push({
       code: "invalid_handler_key",
       message: `Lifecycle hook "${hookId || path}" handler key must use lowercase letters, numbers, and underscores.`,
