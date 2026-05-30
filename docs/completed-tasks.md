@@ -8,3 +8,8 @@ Append brief entries here when project work is completed. Keep this file concise
   Outcome: Workflow schema `0.7.0` now supports stable dotted action IDs, editable action labels, label-based Mermaid previews, lifecycle hook retargeting on ID edits, and documented audit guidance.
   Verification: `npm run verify` passed.
   Traceability: `main` at `ae984bc`; changed `src/lib/workflow.ts`, `src/App.tsx`, `src/styles.css`, tests, README, and `docs/json-file-formats.md`.
+
+- Task: Improve workflow lifecycle hooks panel readability
+  Outcome: Lifecycle phase controls now stack cleanly, and hook rows show target, handler, and status in a readable two-line layout.
+  Verification: `npm run lint`, `npm run test`, `npm run build`, and Chrome visual check at `http://127.0.0.1:5174/` passed; existing React `act(...)` warning and Vite chunk-size warning remain.
+  Traceability: `main` at `b4bc65d`; changed `src/App.tsx` and `src/styles.css`.
