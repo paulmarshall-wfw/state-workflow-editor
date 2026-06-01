@@ -899,6 +899,39 @@ describe("App", () => {
     expect(source).toContain('running -->|"Cancel (cancel_running)"| cancelled');
   });
 
+  it("HTML-encodes double quotes inside workflow Mermaid labels", () => {
+    const definition = {
+      schemaVersion: "0.3.0",
+      appName: "Example Project",
+      definitionVersion: "0.1.0",
+      id: "scan_job_state",
+      states: ["queued", "running"],
+      entryStates: ["queued"],
+      terminalStates: [],
+      transitions: [{ from: "queued", to: "running" }],
+    } as const;
+    const workflow = {
+      schemaVersion: "0.7.0",
+      appName: "Example Project",
+      workflowVersion: "0.1.0",
+      id: "scan_job_workflow",
+      stateMachine: { id: "scan_job_state", definitionVersion: "0.1.0" },
+      states: [
+        { id: "queued", visible: true },
+        { id: "running", visible: true },
+      ],
+      actions: [
+        { id: "start", label: 'Say "Go"', from: "queued", to: "running", trigger: "user", visible: true },
+      ],
+      buckets: [],
+      hooks: [],
+    } as const;
+
+    const source = buildWorkflowMermaidDiagram(definition, workflow, "light");
+
+    expect(source).toContain('queued -->|"Say &quot;Go&quot;"| running');
+  });
+
   it("toggles and persists light and dark mode from the icon beside the app name", async () => {
     const user = userEvent.setup();
     render(<App />);

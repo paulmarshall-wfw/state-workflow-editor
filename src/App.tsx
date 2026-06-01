@@ -4693,11 +4693,11 @@ export function buildWorkflowMermaidDiagram(
 }
 
 function escapeMermaidLabel(label: string) {
-  return label.replace(/\|/g, "/");
+  return label.replace(/\|/g, "/").replace(/"/g, "&quot;");
 }
 
 function quoteMermaidEdgeLabel(label: string) {
-  return `"${escapeMermaidLabel(label).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  return `"${escapeMermaidLabel(label).replace(/\\/g, "\\\\")}"`;
 }
 
 function getMermaidFlowchartDeclaration(diagramDirection: DiagramDirection) {

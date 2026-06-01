@@ -20,3 +20,11 @@ Project-specific constraints:
 - The state-machine core must remain project-agnostic.
 - Keep workflow actions, guards, side effects, authorization, persistence, logging, jobs, retries, and idempotency out of the state-machine core unless a later approved plan changes the boundary.
 - The visual editor may author state-machine definitions, but it must not turn the state-machine layer into the workflow layer.
+## Port Registry
+
+Before adding or changing local ports, check and update
+`/Users/paulmarshall/Software Development/All Standards/local-port-registry.md`; record project ports in this file's Runtime Notes. After updating, run:
+
+```bash
+python3 "/Users/paulmarshall/Software Development/All Standards/scripts/check-local-port-registry.py"
+```
