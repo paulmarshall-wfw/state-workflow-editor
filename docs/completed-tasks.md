@@ -23,3 +23,10 @@ Append brief entries here when project work is completed. Keep this file concise
   Outcome: Workflow edge labels are now emitted as quoted Mermaid text, so disambiguated labels like `Cancel (cancel_queued)` render correctly instead of breaking the preview.
   Verification: `npm test` and `npm run lint` passed; manual Chrome reload confirmed the workflow diagram renders again at `http://127.0.0.1:5174/`; existing React `act(...)` warning remains during tests.
   Traceability: `main` at `74c6252`; changed `src/App.tsx` and `src/App.test.tsx`.
+
+## 2026-06-06
+
+- Task: Extend while-in-state schedule authoring
+  Outcome: Workflow schema `0.8.0` now supports daily `while_in_state` schedules, recurring `runLimit.maxRuns`, editor controls for daily time and capped runs, import repair behavior, and updated contract documentation.
+  Verification: `npm test -- --run src/lib/workflow.test.ts src/App.test.tsx`, `npm run lint`, `npm test`, and `npm run build` passed; existing Mermaid React `act(...)` warning and Vite large-chunk warning remain.
+  Traceability: `main` at `7c0c521`; changed `src/lib/workflow.ts`, `src/App.tsx`, `src/styles.css`, tests, README, `docs/json-file-formats.md`, and `docs/plans/state-workflow-editor.md`; plan source is `"docs/plans/00 Extend While-In-State Schedule Authoring.md"`.

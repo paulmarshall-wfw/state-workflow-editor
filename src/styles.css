@@ -1034,7 +1034,8 @@ button:focus-visible {
   align-items: center;
 }
 
-.lifecycle-editor-form label {
+.lifecycle-editor-form label,
+.lifecycle-editor-form .form-label {
   color: var(--text-secondary);
   font-size: 0.84rem;
   font-weight: 850;
@@ -1044,6 +1045,23 @@ button:focus-visible {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(110px, 0.45fr);
   gap: 8px;
+}
+
+.run-limit-control {
+  display: grid;
+  gap: 8px;
+}
+
+.inline-checkbox {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  gap: 8px;
+}
+
+.inline-checkbox input {
+  width: auto;
+  min-height: auto;
 }
 
 .workflow-bucket-list,

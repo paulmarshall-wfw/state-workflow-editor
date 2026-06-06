@@ -419,6 +419,24 @@ describe("workflow definition validation", () => {
             targetId: "failed",
             handlerKey: "check_failed",
             schedule: { trigger: "every_interval", intervalMs: 900000 },
+            runLimit: { maxRuns: 5 },
+          },
+        ],
+      },
+      stateMachine,
+    );
+    const dailyResult = validateWorkflowDefinition(
+      {
+        ...workflow,
+        hooks: [
+          {
+            id: "while_queued",
+            phase: "while_in_state",
+            targetType: "state",
+            targetId: "queued",
+            handlerKey: "check_queued",
+            schedule: { trigger: "daily", timeOfDay: "08:30" },
+            runLimit: { maxRuns: 2 },
           },
         ],
       },
@@ -427,6 +445,7 @@ describe("workflow definition validation", () => {
 
     expect(afterDurationResult.valid).toBe(true);
     expect(everyIntervalResult.valid).toBe(true);
+    expect(dailyResult.valid).toBe(true);
   });
 
   it("rejects invalid lifecycle schedules and retry policies", () => {
@@ -466,6 +485,24 @@ describe("workflow definition validation", () => {
             schedule: { trigger: "every_minute", intervalMs: 60000 },
           } as unknown as WorkflowDefinition["hooks"][number],
           {
+            id: "while_daily_invalid",
+            phase: "while_in_state",
+            targetType: "state",
+            targetId: "running",
+            handlerKey: "check_daily",
+            schedule: { trigger: "daily", timeOfDay: "24:00" },
+            runLimit: { maxRuns: 0 },
+          },
+          {
+            id: "while_once",
+            phase: "while_in_state",
+            targetType: "state",
+            targetId: "failed",
+            handlerKey: "check_once",
+            schedule: { trigger: "after_duration", delayMs: 60000 },
+            runLimit: { maxRuns: 3 },
+          },
+          {
             id: "while_completed",
             phase: "while_in_state",
             targetType: "state",
@@ -479,6 +516,7 @@ describe("workflow definition validation", () => {
             targetId: "running",
             schedule: { trigger: "after_duration", delayMs: 60000 },
             retryPolicy: { maxAttempts: 3, delayMs: 1000 },
+            runLimit: { maxRuns: 3 },
           },
         ],
       },
@@ -491,6 +529,8 @@ describe("workflow definition validation", () => {
         "missing_scheduled_handler",
         "invalid_lifecycle_schedule_trigger",
         "invalid_lifecycle_schedule_duration",
+        "lifecycle_run_limit_on_unsupported_schedule",
+        "invalid_lifecycle_run_limit",
         "lifecycle_retry_on_unsupported_phase",
         "invalid_lifecycle_retry_policy",
         "lifecycle_schedule_on_unsupported_phase",
@@ -510,6 +550,7 @@ describe("workflow definition validation", () => {
             targetId: "running",
             handlerKey: "check_running",
             schedule: { trigger: "every_interval", intervalMs: 900000 },
+            runLimit: { maxRuns: 4 },
             retryPolicy: { maxAttempts: 3, delayMs: 60000 },
           },
         ],
@@ -519,6 +560,7 @@ describe("workflow definition validation", () => {
     const hook = definedWorkflow.definition.hooks[0];
 
     expect(hook.schedule).toEqual({ trigger: "every_interval", intervalMs: 900000 });
+    expect(hook.runLimit).toEqual({ maxRuns: 4 });
     expect(hook.retryPolicy).toEqual({ maxAttempts: 3, delayMs: 60000 });
     expect(hook.schedule).not.toBe(workflow.hooks[0]?.schedule);
   });

@@ -5,8 +5,8 @@ This document defines the JSON files imported and exported by State Workflow Edi
 Current exported file-format versions:
 
 - State-machine definition: `schemaVersion: "0.3.0"`
-- Workflow definition: `schemaVersion: "0.7.0"`
-- Bundled workflow definition: `schemaVersion: "0.7.0"` plus `embeddedStateMachineDefinition`
+- Workflow definition: `schemaVersion: "0.8.0"`
+- Bundled workflow definition: `schemaVersion: "0.8.0"` plus `embeddedStateMachineDefinition`
 
 `schemaVersion` is the file-format version. `definitionVersion` and `workflowVersion` are user-controlled SemVer values for the authored definitions. They are separate from the app/package version in `package.json`.
 
@@ -85,7 +85,7 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
 
 ```json
 {
-  "schemaVersion": "0.7.0",
+  "schemaVersion": "0.8.0",
   "appName": "Example App",
   "workflowVersion": "0.1.0",
   "id": "scan_job_workflow",
@@ -156,6 +156,7 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
       "targetId": "failed",
       "handlerKey": "recheck_failed",
       "schedule": { "trigger": "every_interval", "intervalMs": 900000 },
+      "runLimit": { "maxRuns": 12 },
       "retryPolicy": { "maxAttempts": 3, "delayMs": 60000 }
     }
   ]
@@ -166,7 +167,7 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `schemaVersion` | Yes | Must be `"0.7.0"` for current exports. |
+| `schemaVersion` | Yes | Must be `"0.8.0"` for current exports. |
 | `appName` | Yes | Human-facing target app/project name. |
 | `workflowVersion` | Yes | User-controlled SemVer for this workflow definition. |
 | `id` | Yes | Stable workflow definition ID. |
@@ -252,6 +253,7 @@ Lifecycle hooks are optional app-processing metadata. The editor validates and e
 | `targetId` | Yes | Action ID or state ID, depending on `targetType`. |
 | `handlerKey` | No | Main target-app handler key. |
 | `schedule` | For `while_in_state` only | Schedule metadata for while-in-state hooks. |
+| `runLimit` | For recurring `while_in_state` schedules only | Optional cap on scheduled handler executions during one state residency. |
 | `retryPolicy` | For `while_in_state` only | Optional target-app retry metadata for scheduled hooks. |
 | `onSuccess.handlerKey` | No | Optional target-app success handler key. |
 | `onFailure.handlerKey` | No | Optional target-app failure handler key. |
@@ -268,6 +270,7 @@ Supported phases:
 Hook IDs and handler keys must be lowercase snake_case identifiers. A workflow cannot define two hooks for the same `phase`, `targetType`, and `targetId`.
 
 Scheduled hooks require a valid `handlerKey`. Only `while_in_state` hooks may define `schedule`; schedules on `before_transition`, `on_state_entry`, or `on_terminal_entry` are invalid.
+Only recurring `while_in_state` schedules may define `runLimit`; run limits on `after_duration` or non-scheduled phases are invalid.
 Only `while_in_state` hooks may define `retryPolicy`; retry metadata on other phases is invalid.
 
 Supported schedule shapes:
@@ -276,6 +279,20 @@ Supported schedule shapes:
 | --- | --- | --- |
 | `after_duration` | `{ "trigger": "after_duration", "delayMs": number }` | `delayMs` must be a positive integer in milliseconds. |
 | `every_interval` | `{ "trigger": "every_interval", "intervalMs": number }` | `intervalMs` must be a positive integer in milliseconds. |
+| `daily` | `{ "trigger": "daily", "timeOfDay": "HH:mm" }` | `timeOfDay` must be 24-hour local target-app wall-clock time with no timezone field. |
+
+Target apps decide timezone, daylight-saving behavior, catch-up behavior, missed executions, scheduler persistence, and any due-work record model for `daily` schedules.
+
+Optional recurring run-limit shape:
+
+```json
+{ "maxRuns": 12 }
+```
+
+- `maxRuns` must be a positive integer.
+- The cap is per state residency: after an item enters the target state, scheduled handler executions stop once `maxRuns` executions have run while the item remains in that state.
+- `runLimit` is valid only for recurring `every_interval` and `daily` schedules.
+- `runLimit.maxRuns` is separate from `retryPolicy.maxAttempts`; retry attempts count failures for one scheduled execution.
 
 Optional retry policy shape:
 
@@ -296,6 +313,7 @@ Example FileCatalog-style scheduled hook:
   "targetId": "unsupported",
   "handlerKey": "recheck_file_type_support",
   "schedule": { "trigger": "every_interval", "intervalMs": 900000 },
+  "runLimit": { "maxRuns": 12 },
   "retryPolicy": { "maxAttempts": 3, "delayMs": 60000 }
 }
 ```
@@ -306,7 +324,7 @@ A bundled workflow definition has the same workflow fields as a linked workflow 
 
 ```json
 {
-  "schemaVersion": "0.7.0",
+  "schemaVersion": "0.8.0",
   "appName": "Example App",
   "workflowVersion": "0.1.0",
   "id": "scan_job_workflow",
@@ -390,7 +408,7 @@ When a workflow is imported, it is reconciled to the effective state-machine def
 
 ### Legacy Workflow Imports
 
-The editor accepts workflow schema `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, and `0.6.0` imports and upgrades them in memory to current schema `0.7.0`. Browser-local Library workflows and current workspace drafts with those schema versions are also upgraded in memory when loaded. Loading an old saved record does not rewrite it; the upgraded schema is saved only when the user saves or duplicates the workflow.
+The editor accepts workflow schema `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, and `0.7.0` imports and upgrades them in memory to current schema `0.8.0`. Browser-local Library workflows and current workspace drafts with those schema versions are also upgraded in memory when loaded. Loading an old saved record does not rewrite it; the upgraded schema is saved only when the user saves or duplicates the workflow.
 
 Legacy normalization rules:
 
@@ -402,7 +420,7 @@ Legacy normalization rules:
 - missing `hooks` becomes `[]`
 - legacy `action.processing.handlerKey` values become `before_transition` lifecycle hooks unless an explicit hook already exists for the same action
 - imported action IDs and labels are preserved exactly; label-derived suffix IDs such as `accept_2` are surfaced for manual correction rather than guessed automatically
-- imported hook `schedule` and `retryPolicy` objects are preserved closely enough for validation to report unsupported triggers, invalid durations, and invalid retry fields
+- imported hook `schedule`, `runLimit`, and `retryPolicy` objects are preserved closely enough for validation to report unsupported triggers, invalid durations or times, invalid run limits, and invalid retry fields
 - missing schedules are not invented for imported `while_in_state` hooks; those hooks load visibly and block workflow export until the author chooses a valid schedule and handler key
 
-New exports always use workflow schema `0.7.0`, always omit action-level `processing`, and always include `buckets` and `hooks` arrays.
+New exports always use workflow schema `0.8.0`, always omit action-level `processing`, and always include `buckets` and `hooks` arrays.

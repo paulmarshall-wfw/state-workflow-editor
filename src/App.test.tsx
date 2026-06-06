@@ -496,7 +496,7 @@ describe("App", () => {
     expect(screen.getByTitle(workflowRecord.savedAt)).toHaveTextContent(`Saved ${formattedWorkflowSavedAt}`);
   });
 
-  it("upgrades saved current draft and Library workflows from schema 0.6.0 when loading", async () => {
+  it("upgrades saved current draft and Library workflows from schema 0.7.0 when loading", async () => {
     const fakeIndexedDb = createFakeIndexedDb();
     const savedAt = "2026-05-28T00:00:00.000Z";
     const definition = {
@@ -513,7 +513,7 @@ describe("App", () => {
       ],
     };
     const draftWorkflow = {
-      schemaVersion: "0.6.0",
+      schemaVersion: "0.7.0",
       appName: "Example Project",
       workflowVersion: "0.1.0",
       id: "draft_workflow",
@@ -589,7 +589,7 @@ describe("App", () => {
     await clickWorkflowAction(user, "Export Workflow");
     let workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
 
-    expect(workflowExport.schemaVersion).toBe("0.7.0");
+    expect(workflowExport.schemaVersion).toBe("0.8.0");
     expect(workflowExport.id).toBe("draft_workflow");
 
     await user.click(screen.getByRole("button", { name: "Library" }));
@@ -602,7 +602,7 @@ describe("App", () => {
     await clickWorkflowAction(user, "Export Workflow");
     workflowExport = JSON.parse(await readBlobText(write.mock.calls[1][0] as Blob));
 
-    expect(workflowExport.schemaVersion).toBe("0.7.0");
+    expect(workflowExport.schemaVersion).toBe("0.8.0");
     expect(workflowExport.id).toBe("library_workflow");
   });
 
@@ -789,7 +789,7 @@ describe("App", () => {
       transitions: [{ from: "queued", to: "running" }],
     } as const;
     const workflow = {
-      schemaVersion: "0.7.0",
+      schemaVersion: "0.8.0",
       appName: "Example Project",
       workflowVersion: "0.1.0",
       id: "scan_job_workflow",
@@ -826,7 +826,7 @@ describe("App", () => {
       ],
     } as const;
     const workflow = {
-      schemaVersion: "0.7.0",
+      schemaVersion: "0.8.0",
       appName: "Example Project",
       workflowVersion: "0.1.0",
       id: "scan_job_workflow",
@@ -875,7 +875,7 @@ describe("App", () => {
       ],
     } as const;
     const workflow = {
-      schemaVersion: "0.7.0",
+      schemaVersion: "0.8.0",
       appName: "Example Project",
       workflowVersion: "0.1.0",
       id: "scan_job_workflow",
@@ -911,7 +911,7 @@ describe("App", () => {
       transitions: [{ from: "queued", to: "running" }],
     } as const;
     const workflow = {
-      schemaVersion: "0.7.0",
+      schemaVersion: "0.8.0",
       appName: "Example Project",
       workflowVersion: "0.1.0",
       id: "scan_job_workflow",
@@ -2172,7 +2172,7 @@ describe("App", () => {
     await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
     const workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
 
-    expect(workflowExport.schemaVersion).toBe("0.7.0");
+    expect(workflowExport.schemaVersion).toBe("0.8.0");
     expect(workflowExport.hooks).toEqual([
       {
         id: "while_in_state_failed",
@@ -2182,6 +2182,112 @@ describe("App", () => {
         handlerKey: "check_failed",
         schedule: { trigger: "after_duration", delayMs: 7200000 },
         retryPolicy: { maxAttempts: 3, delayMs: 60000 },
+      },
+    ]);
+  });
+
+  it("adds daily while-in-state lifecycle hooks and exports linked and bundled schedules", async () => {
+    const user = userEvent.setup();
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const showSaveFilePicker = vi.fn().mockResolvedValue({
+      createWritable: vi.fn().mockResolvedValue({ write, close }),
+    });
+
+    (
+      window as Window & {
+        showSaveFilePicker?: typeof showSaveFilePicker;
+      }
+    ).showSaveFilePicker = showSaveFilePicker;
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Lifecycle" }));
+
+    const whileInStateSection = screen.getByLabelText("While In State target").closest("section") as HTMLElement;
+
+    await user.selectOptions(screen.getByLabelText("While In State target"), "failed");
+    await user.click(within(whileInStateSection).getByRole("button", { name: "Add Hook" }));
+    await user.type(screen.getByLabelText("Main Handler Key"), "check_failed");
+    await user.selectOptions(screen.getByLabelText("Schedule Trigger"), "daily");
+
+    expect(screen.queryByLabelText("Schedule Duration")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Schedule Time")).toHaveValue("09:00");
+
+    await user.clear(screen.getByLabelText("Schedule Time"));
+    await user.type(screen.getByLabelText("Schedule Time"), "18:45");
+
+    await clickWorkflowAction(user, "Export Workflow");
+    await clickWorkflowAction(user, "Export Bundled Workflow");
+
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(2));
+    const linkedExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
+    const bundledExport = JSON.parse(await readBlobText(write.mock.calls[1][0] as Blob));
+    const expectedHooks = [
+      {
+        id: "while_in_state_failed",
+        phase: "while_in_state",
+        targetType: "state",
+        targetId: "failed",
+        handlerKey: "check_failed",
+        schedule: { trigger: "daily", timeOfDay: "18:45" },
+      },
+    ];
+
+    expect(linkedExport.schemaVersion).toBe("0.8.0");
+    expect(linkedExport.hooks).toEqual(expectedHooks);
+    expect(bundledExport.schemaVersion).toBe("0.8.0");
+    expect(bundledExport.hooks).toEqual(expectedHooks);
+    expect(bundledExport.embeddedStateMachineDefinition.id).toBe("scan_job_state");
+  });
+
+  it("exports recurring run limits for interval while-in-state hooks", async () => {
+    const user = userEvent.setup();
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const showSaveFilePicker = vi.fn().mockResolvedValue({
+      createWritable: vi.fn().mockResolvedValue({ write, close }),
+    });
+
+    (
+      window as Window & {
+        showSaveFilePicker?: typeof showSaveFilePicker;
+      }
+    ).showSaveFilePicker = showSaveFilePicker;
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Lifecycle" }));
+
+    const whileInStateSection = screen.getByLabelText("While In State target").closest("section") as HTMLElement;
+
+    await user.selectOptions(screen.getByLabelText("While In State target"), "failed");
+    await user.click(within(whileInStateSection).getByRole("button", { name: "Add Hook" }));
+    await user.type(screen.getByLabelText("Main Handler Key"), "check_failed");
+
+    expect(screen.getByLabelText("Run Limit")).not.toBeChecked();
+    await user.click(screen.getByLabelText("Run Limit"));
+    const runLimitMaxRunsInput = await screen.findByLabelText("Run Limit Max Runs");
+
+    await user.clear(runLimitMaxRunsInput);
+    await user.type(runLimitMaxRunsInput, "4");
+
+    await clickWorkflowAction(user, "Export Workflow");
+
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    const workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
+
+    expect(workflowExport.hooks).toEqual([
+      {
+        id: "while_in_state_failed",
+        phase: "while_in_state",
+        targetType: "state",
+        targetId: "failed",
+        handlerKey: "check_failed",
+        schedule: { trigger: "every_interval", intervalMs: 900000 },
+        runLimit: { maxRuns: 4 },
       },
     ]);
   });
@@ -2216,7 +2322,7 @@ describe("App", () => {
     render(<App />);
 
     const json = JSON.stringify({
-      schemaVersion: "0.7.0",
+      schemaVersion: "0.8.0",
       appName: "Article Manager",
       workflowVersion: "1.0.0",
       id: "article_workflow",
@@ -2510,7 +2616,7 @@ describe("App", () => {
     const linkedExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
     const bundledExport = JSON.parse(await readBlobText(write.mock.calls[1][0] as Blob));
 
-    expect(linkedExport.schemaVersion).toBe("0.7.0");
+    expect(linkedExport.schemaVersion).toBe("0.8.0");
     expect(linkedExport.states).toEqual([
       { id: "queued", visible: true },
       { id: "running", visible: true },
@@ -2680,12 +2786,73 @@ describe("App", () => {
     expect(screen.queryByLabelText("Action 1 handler key")).not.toBeInTheDocument();
   });
 
+  it("preserves imported daily schedules and run limits", async () => {
+    const user = userEvent.setup();
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const showSaveFilePicker = vi.fn().mockResolvedValue({
+      createWritable: vi.fn().mockResolvedValue({ write, close }),
+    });
+
+    (
+      window as Window & {
+        showSaveFilePicker?: typeof showSaveFilePicker;
+      }
+    ).showSaveFilePicker = showSaveFilePicker;
+
+    render(<App />);
+
+    const json = JSON.stringify({
+      schemaVersion: "0.8.0",
+      appName: "Article Manager",
+      workflowVersion: "1.0.0",
+      id: "article_workflow",
+      stateMachine: { id: "scan_job_state", definitionVersion: "0.1.0" },
+      states: ["queued", "running", "completed", "failed", "cancelled"],
+      actions: [],
+      buckets: [],
+      hooks: [
+        {
+          id: "while_running",
+          phase: "while_in_state",
+          targetType: "state",
+          targetId: "running",
+          handlerKey: "check_running",
+          schedule: { trigger: "daily", timeOfDay: "07:15" },
+          runLimit: { maxRuns: 6 },
+        },
+      ],
+    });
+
+    fireEvent.change(screen.getByLabelText("Import workflow JSON definition"), {
+      target: { files: [createTextFile(json, "daily-workflow.json")] },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Lifecycle" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workflow ID")).toHaveValue("article_workflow");
+    });
+    expect(screen.getByLabelText("Schedule Trigger")).toHaveValue("daily");
+    expect(screen.getByLabelText("Schedule Time")).toHaveValue("07:15");
+    expect(screen.getByLabelText("Run Limit")).toBeChecked();
+    expect(screen.getByLabelText("Run Limit Max Runs")).toHaveValue(6);
+
+    await clickWorkflowAction(user, "Export Workflow");
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    const workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
+
+    expect(workflowExport.hooks[0].schedule).toEqual({ trigger: "daily", timeOfDay: "07:15" });
+    expect(workflowExport.hooks[0].runLimit).toEqual({ maxRuns: 6 });
+  });
+
   it("preserves invalid imported schedule fields for validation", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     const json = JSON.stringify({
-      schemaVersion: "0.7.0",
+      schemaVersion: "0.8.0",
       appName: "Article Manager",
       workflowVersion: "1.0.0",
       id: "article_workflow",
@@ -2722,6 +2889,56 @@ describe("App", () => {
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Close workflow validation issues" }));
     await expectWorkflowAction(user, "Export Workflow", false);
+  });
+
+  it("preserves invalid imported run limits so they can be cleared", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const json = JSON.stringify({
+      schemaVersion: "0.8.0",
+      appName: "Article Manager",
+      workflowVersion: "1.0.0",
+      id: "article_workflow",
+      stateMachine: { id: "scan_job_state", definitionVersion: "0.1.0" },
+      states: ["queued", "running", "completed", "failed", "cancelled"],
+      actions: [],
+      buckets: [],
+      hooks: [
+        {
+          id: "while_running",
+          phase: "while_in_state",
+          targetType: "state",
+          targetId: "running",
+          handlerKey: "check_running",
+          schedule: { trigger: "every_interval", intervalMs: 900000 },
+          runLimit: { maxRuns: "often" },
+        },
+      ],
+    });
+
+    fireEvent.change(screen.getByLabelText("Import workflow JSON definition"), {
+      target: { files: [createTextFile(json, "invalid-run-limit-workflow.json")] },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await user.click(screen.getByRole("button", { name: "Lifecycle" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workflow ID")).toHaveValue("article_workflow");
+    });
+    expect(screen.getByLabelText("Run Limit")).toBeChecked();
+    expect(screen.getByLabelText("Run Limit Max Runs")).toHaveValue(null);
+    expect(
+      within(await openWorkflowValidationIssues(user)).getByText(/runLimit maxRuns must be a positive integer/),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close workflow validation issues" }));
+    await expectWorkflowAction(user, "Export Workflow", false);
+
+    await user.click(screen.getByLabelText("Run Limit"));
+
+    await expectWorkflowAction(user, "Export Workflow", true);
+    expect(screen.queryByLabelText("Run Limit Max Runs")).not.toBeInTheDocument();
   });
 
   it("imports linked workflow definitions with explicit empty bucket overlays", async () => {

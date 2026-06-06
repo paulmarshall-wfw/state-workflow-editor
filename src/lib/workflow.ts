@@ -7,7 +7,7 @@ import {
   validateStateMachineDefinition,
 } from "./stateMachine";
 
-export const WORKFLOW_SCHEMA_VERSION = "0.7.0" as const;
+export const WORKFLOW_SCHEMA_VERSION = "0.8.0" as const;
 
 export type WorkflowSchemaVersion = typeof WORKFLOW_SCHEMA_VERSION;
 
@@ -47,11 +47,19 @@ export type WorkflowLifecycleHookSchedule =
   | {
       trigger: "every_interval";
       intervalMs: number;
+    }
+  | {
+      trigger: "daily";
+      timeOfDay: string;
     };
 
 export type WorkflowLifecycleHookRetryPolicy = {
   maxAttempts: number;
   delayMs: number;
+};
+
+export type WorkflowLifecycleHookRunLimit = {
+  maxRuns: number;
 };
 
 export type WorkflowLifecycleHook<State extends string = string> = {
@@ -61,6 +69,7 @@ export type WorkflowLifecycleHook<State extends string = string> = {
   targetId: string;
   handlerKey?: string;
   schedule?: WorkflowLifecycleHookSchedule;
+  runLimit?: WorkflowLifecycleHookRunLimit;
   retryPolicy?: WorkflowLifecycleHookRetryPolicy;
   onSuccess?: WorkflowLifecycleHandler;
   onFailure?: WorkflowLifecycleHandler;
@@ -123,6 +132,8 @@ export type WorkflowValidationCode =
   | "invalid_lifecycle_schedule_duration"
   | "lifecycle_schedule_on_unsupported_phase"
   | "missing_scheduled_handler"
+  | "lifecycle_run_limit_on_unsupported_schedule"
+  | "invalid_lifecycle_run_limit"
   | "lifecycle_retry_on_unsupported_phase"
   | "invalid_lifecycle_retry_policy"
   | "duplicate_workflow_state"
@@ -458,6 +469,7 @@ export function validateWorkflowDefinition<State extends string>(
     validateHandlerKey(hook.onSuccess?.handlerKey, `hooks.${index}.onSuccess.handlerKey`, hook.id, errors);
     validateHandlerKey(hook.onFailure?.handlerKey, `hooks.${index}.onFailure.handlerKey`, hook.id, errors);
     validateLifecycleSchedule(hook, index, errors);
+    validateLifecycleRunLimit(hook, index, errors);
     validateLifecycleRetryPolicy(hook, index, errors);
 
     if (hook.phase === "before_transition") {
@@ -625,6 +637,7 @@ function copyLifecycleHook<State extends string>(hook: WorkflowLifecycleHook<Sta
   return {
     ...hook,
     schedule: hook.schedule ? { ...hook.schedule } : undefined,
+    runLimit: hook.runLimit ? { ...hook.runLimit } : undefined,
     retryPolicy: hook.retryPolicy ? { ...hook.retryPolicy } : undefined,
     onSuccess: hook.onSuccess ? { ...hook.onSuccess } : undefined,
     onFailure: hook.onFailure ? { ...hook.onFailure } : undefined,
@@ -704,12 +717,27 @@ function validateLifecycleSchedule<State extends string>(
 
   const scheduleRecord = schedule as Record<string, unknown>;
 
-  if (scheduleRecord.trigger !== "after_duration" && scheduleRecord.trigger !== "every_interval") {
+  if (
+    scheduleRecord.trigger !== "after_duration" &&
+    scheduleRecord.trigger !== "every_interval" &&
+    scheduleRecord.trigger !== "daily"
+  ) {
     errors.push({
       code: "invalid_lifecycle_schedule_trigger",
-      message: `Lifecycle hook "${hook.id || index + 1}" schedule trigger must be after_duration or every_interval.`,
+      message: `Lifecycle hook "${hook.id || index + 1}" schedule trigger must be after_duration, every_interval, or daily.`,
       path: `hooks.${index}.schedule.trigger`,
     });
+    return;
+  }
+
+  if (scheduleRecord.trigger === "daily") {
+    if (typeof scheduleRecord.timeOfDay !== "string" || !isValidDailyScheduleTime(scheduleRecord.timeOfDay)) {
+      errors.push({
+        code: "invalid_lifecycle_schedule_duration",
+        message: `Lifecycle hook "${hook.id || index + 1}" schedule timeOfDay must use 24-hour HH:mm format.`,
+        path: `hooks.${index}.schedule.timeOfDay`,
+      });
+    }
     return;
   }
 
@@ -721,6 +749,40 @@ function validateLifecycleSchedule<State extends string>(
       code: "invalid_lifecycle_schedule_duration",
       message: `Lifecycle hook "${hook.id || index + 1}" schedule ${durationPath} must be a positive integer.`,
       path: `hooks.${index}.schedule.${durationPath}`,
+    });
+  }
+}
+
+function validateLifecycleRunLimit<State extends string>(
+  hook: WorkflowLifecycleHook<State>,
+  index: number,
+  errors: WorkflowValidationError[],
+) {
+  if (!hook.runLimit) {
+    return;
+  }
+
+  const scheduleRecord = hook.schedule as Record<string, unknown> | undefined;
+  const hasRecurringSchedule =
+    hook.phase === "while_in_state" &&
+    (scheduleRecord?.trigger === "every_interval" || scheduleRecord?.trigger === "daily");
+
+  if (!hasRecurringSchedule) {
+    errors.push({
+      code: "lifecycle_run_limit_on_unsupported_schedule",
+      message: `Lifecycle hook "${hook.id || index + 1}" can only define run limit for recurring while-in-state schedules.`,
+      path: `hooks.${index}.runLimit`,
+    });
+    return;
+  }
+
+  const runLimit = hook.runLimit as Record<string, unknown>;
+
+  if (!Number.isInteger(runLimit.maxRuns) || Number(runLimit.maxRuns) <= 0) {
+    errors.push({
+      code: "invalid_lifecycle_run_limit",
+      message: `Lifecycle hook "${hook.id || index + 1}" runLimit maxRuns must be a positive integer.`,
+      path: `hooks.${index}.runLimit.maxRuns`,
     });
   }
 }
@@ -764,4 +826,8 @@ function validateLifecycleRetryPolicy<State extends string>(
 
 function isValidWorkflowVersion(version: string): boolean {
   return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?$/.test(version);
+}
+
+function isValidDailyScheduleTime(value: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }

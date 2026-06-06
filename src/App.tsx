@@ -24,6 +24,7 @@ import {
   WorkflowLifecycleHook,
   WorkflowLifecyclePhase,
   WorkflowLifecycleHookRetryPolicy,
+  WorkflowLifecycleHookRunLimit,
   WorkflowLifecycleHookSchedule,
   WorkflowValidationError,
   buildStateMachineDefinitionKey,
@@ -843,7 +844,10 @@ export function App() {
           schedule:
             trigger === "after_duration"
               ? { trigger, delayMs: durationMs }
-              : { trigger, intervalMs: durationMs },
+              : trigger === "daily"
+                ? { trigger, timeOfDay: getLifecycleScheduleTimeOfDay(hook.schedule) ?? "09:00" }
+                : { trigger, intervalMs: durationMs },
+          runLimit: isRecurringScheduleTrigger(trigger) ? hook.runLimit : undefined,
         };
       }),
     }));
@@ -866,7 +870,43 @@ export function App() {
           schedule:
             trigger === "after_duration"
               ? { trigger, delayMs: nextDurationMs }
-              : { trigger, intervalMs: nextDurationMs },
+              : trigger === "daily"
+                ? { trigger, timeOfDay: getLifecycleScheduleTimeOfDay(hook.schedule) ?? "09:00" }
+                : { trigger, intervalMs: nextDurationMs },
+        };
+      }),
+    }));
+  }
+
+  function updateLifecycleHookScheduleTimeOfDay(index: number, timeOfDay: string) {
+    setWorkflow((current) => ({
+      ...current,
+      hooks: current.hooks.map((hook, hookIndex) => {
+        if (hookIndex !== index || hook.phase !== "while_in_state") {
+          return hook;
+        }
+
+        return {
+          ...hook,
+          schedule: { trigger: "daily", timeOfDay },
+        };
+      }),
+    }));
+  }
+
+  function updateLifecycleHookRunLimit(index: number, value: string) {
+    setWorkflow((current) => ({
+      ...current,
+      hooks: current.hooks.map((hook, hookIndex) => {
+        if (hookIndex !== index) {
+          return hook;
+        }
+
+        const trimmedValue = value.trim();
+
+        return {
+          ...hook,
+          runLimit: trimmedValue === "" ? undefined : { maxRuns: Number(trimmedValue) },
         };
       }),
     }));
@@ -2159,6 +2199,8 @@ export function App() {
                       onHandlerChange={updateLifecycleHookHandler}
                       onScheduleTriggerChange={updateLifecycleHookScheduleTrigger}
                       onScheduleDurationChange={updateLifecycleHookScheduleDuration}
+                      onScheduleTimeOfDayChange={updateLifecycleHookScheduleTimeOfDay}
+                      onRunLimitChange={updateLifecycleHookRunLimit}
                       onRetryPolicyChange={updateLifecycleHookRetryPolicy}
                       onRemove={removeLifecycleHook}
                     />
@@ -2979,6 +3021,8 @@ function WorkflowLifecycleEditor({
   onHandlerChange,
   onScheduleTriggerChange,
   onScheduleDurationChange,
+  onScheduleTimeOfDayChange,
+  onRunLimitChange,
   onRetryPolicyChange,
   onRemove,
 }: {
@@ -2995,6 +3039,8 @@ function WorkflowLifecycleEditor({
   ) => void;
   onScheduleTriggerChange: (index: number, trigger: WorkflowLifecycleHookSchedule["trigger"]) => void;
   onScheduleDurationChange: (index: number, amount: string, unit: ScheduleUnit) => void;
+  onScheduleTimeOfDayChange: (index: number, timeOfDay: string) => void;
+  onRunLimitChange: (index: number, value: string) => void;
   onRetryPolicyChange: (index: number, field: keyof WorkflowLifecycleHookRetryPolicy, value: string) => void;
   onRemove: (index: number) => void;
 }) {
@@ -3024,6 +3070,16 @@ function WorkflowLifecycleEditor({
   const scheduleUnit = getPreferredScheduleUnit(scheduleDurationMs);
   const scheduleDurationAmount =
     scheduleDurationMs === undefined ? "" : String(scheduleDurationMs / getScheduleUnitFactorMs(scheduleUnit));
+  const scheduleTimeOfDay = getLifecycleScheduleTimeOfDay(hook.schedule) ?? "";
+  const showScheduleDuration = scheduleTrigger === "after_duration" || scheduleTrigger === "every_interval";
+  const showRunLimitControls =
+    hook.phase === "while_in_state" &&
+    (isRecurringScheduleTrigger(scheduleTrigger) || Boolean(hook.runLimit));
+  const runLimitValue =
+    typeof (hook.runLimit as Partial<WorkflowLifecycleHookRunLimit> | undefined)?.maxRuns === "number" &&
+    Number.isFinite((hook.runLimit as Partial<WorkflowLifecycleHookRunLimit>).maxRuns)
+      ? String((hook.runLimit as WorkflowLifecycleHookRunLimit).maxRuns)
+      : "";
   const showRetryControls = hook.phase === "while_in_state" || Boolean(hook.retryPolicy);
 
   return (
@@ -3084,32 +3140,77 @@ function WorkflowLifecycleEditor({
                 )}
                 <option value="every_interval">Every Interval</option>
                 <option value="after_duration">After Duration</option>
+                <option value="daily">Daily</option>
               </select>
 
-              <label htmlFor="lifecycle-schedule-duration">Schedule Duration</label>
-              <div className="duration-control">
-                <input
-                  id="lifecycle-schedule-duration"
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={scheduleDurationAmount}
-                  onChange={(event) => onScheduleDurationChange(hook.index, event.target.value, scheduleUnit)}
-                />
-                <select
-                  aria-label="Schedule Duration Unit"
-                  value={scheduleUnit}
-                  onChange={(event) =>
-                    onScheduleDurationChange(hook.index, scheduleDurationAmount, event.target.value as ScheduleUnit)
-                  }
-                >
-                  {scheduleUnits.map((unit) => (
-                    <option key={unit.id} value={unit.id}>
-                      {unit.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {showScheduleDuration ? (
+                <>
+                  <label htmlFor="lifecycle-schedule-duration">Schedule Duration</label>
+                  <div className="duration-control">
+                    <input
+                      id="lifecycle-schedule-duration"
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={scheduleDurationAmount}
+                      onChange={(event) => onScheduleDurationChange(hook.index, event.target.value, scheduleUnit)}
+                    />
+                    <select
+                      aria-label="Schedule Duration Unit"
+                      value={scheduleUnit}
+                      onChange={(event) =>
+                        onScheduleDurationChange(hook.index, scheduleDurationAmount, event.target.value as ScheduleUnit)
+                      }
+                    >
+                      {scheduleUnits.map((unit) => (
+                        <option key={unit.id} value={unit.id}>
+                          {unit.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              ) : null}
+
+              {scheduleTrigger === "daily" ? (
+                <>
+                  <label htmlFor="lifecycle-schedule-time">Schedule Time</label>
+                  <input
+                    id="lifecycle-schedule-time"
+                    type="time"
+                    value={scheduleTimeOfDay}
+                    onChange={(event) => onScheduleTimeOfDayChange(hook.index, event.target.value)}
+                  />
+                </>
+              ) : null}
+
+              {showRunLimitControls ? (
+                <>
+                  <span className="form-label">Run Limit</span>
+                  <div className="run-limit-control">
+                    <label className="inline-checkbox" htmlFor="lifecycle-run-limit-enabled">
+                      <input
+                        id="lifecycle-run-limit-enabled"
+                        aria-label="Run Limit"
+                        type="checkbox"
+                        checked={Boolean(hook.runLimit)}
+                        onChange={(event) => onRunLimitChange(hook.index, event.target.checked ? runLimitValue || "1" : "")}
+                      />
+                      Stop after N runs
+                    </label>
+                    {hook.runLimit ? (
+                      <input
+                        aria-label="Run Limit Max Runs"
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={runLimitValue}
+                        onChange={(event) => onRunLimitChange(hook.index, event.target.value || "NaN")}
+                      />
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
             </>
           ) : null}
 
@@ -3925,7 +4026,9 @@ function getLifecycleScheduleTrigger(
 ): WorkflowLifecycleHookSchedule["trigger"] | undefined {
   const trigger = (schedule as Record<string, unknown> | undefined)?.trigger;
 
-  return trigger === "after_duration" || trigger === "every_interval" ? trigger : undefined;
+  return trigger === "after_duration" || trigger === "every_interval" || trigger === "daily"
+    ? trigger
+    : undefined;
 }
 
 function getLifecycleScheduleDurationMs(schedule: WorkflowLifecycleHook<string>["schedule"]): number | undefined {
@@ -3939,6 +4042,23 @@ function getLifecycleScheduleDurationMs(schedule: WorkflowLifecycleHook<string>[
     scheduleRecord.trigger === "after_duration" ? scheduleRecord.delayMs : scheduleRecord.intervalMs;
 
   return typeof duration === "number" ? duration : undefined;
+}
+
+function getLifecycleScheduleTimeOfDay(schedule: WorkflowLifecycleHook<string>["schedule"]): string | undefined {
+  const scheduleRecord = schedule as Record<string, unknown> | undefined;
+  const timeOfDay = scheduleRecord?.timeOfDay;
+
+  return typeof timeOfDay === "string" ? timeOfDay : undefined;
+}
+
+function isRecurringScheduleTrigger(
+  trigger: WorkflowLifecycleHookSchedule["trigger"] | undefined,
+): trigger is "every_interval" | "daily" {
+  return trigger === "every_interval" || trigger === "daily";
+}
+
+function isValidDailyScheduleTime(value: string | undefined) {
+  return typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
 function getPreferredScheduleUnit(durationMs: number | undefined): ScheduleUnit {
@@ -3983,16 +4103,25 @@ function isLifecycleHookInvalid(
         (hook.phase !== "on_terminal_entry" || terminalStates.includes(hook.targetId));
   const scheduleTrigger = getLifecycleScheduleTrigger(hook.schedule);
   const scheduleDurationMs = getLifecycleScheduleDurationMs(hook.schedule);
+  const scheduleTimeOfDay = getLifecycleScheduleTimeOfDay(hook.schedule);
   const hasValidSchedule =
     hook.phase === "while_in_state"
       ? Boolean(
           hook.schedule &&
             hook.handlerKey &&
             scheduleTrigger &&
-            Number.isInteger(scheduleDurationMs) &&
-            Number(scheduleDurationMs) > 0,
+            (scheduleTrigger === "daily"
+              ? isValidDailyScheduleTime(scheduleTimeOfDay)
+              : Number.isInteger(scheduleDurationMs) && Number(scheduleDurationMs) > 0),
         )
       : !hook.schedule;
+  const runLimit = hook.runLimit as Partial<WorkflowLifecycleHookRunLimit> | undefined;
+  const hasValidRunLimit =
+    !runLimit ||
+    (hook.phase === "while_in_state" &&
+      isRecurringScheduleTrigger(scheduleTrigger) &&
+      Number.isInteger(runLimit.maxRuns) &&
+      Number(runLimit.maxRuns) > 0);
   const retryPolicy = hook.retryPolicy as Partial<WorkflowLifecycleHookRetryPolicy> | undefined;
   const hasValidRetryPolicy =
     hook.phase === "while_in_state"
@@ -4009,6 +4138,7 @@ function isLifecycleHookInvalid(
     !validTarget ||
     duplicateCount > 1 ||
     !hasValidSchedule ||
+    !hasValidRunLimit ||
     !hasValidRetryPolicy ||
     Boolean(hook.handlerKey && !isWorkflowIdentifier(hook.handlerKey)) ||
     Boolean(hook.onSuccess?.handlerKey && !isWorkflowIdentifier(hook.onSuccess.handlerKey)) ||
@@ -4303,7 +4433,8 @@ function normalizeImportedWorkflowSchemaVersion(schemaVersion: string | undefine
     schemaVersion === "0.3.0" ||
     schemaVersion === "0.4.0" ||
     schemaVersion === "0.5.0" ||
-    schemaVersion === "0.6.0"
+    schemaVersion === "0.6.0" ||
+    schemaVersion === "0.7.0"
     ? WORKFLOW_SCHEMA_VERSION
     : schemaVersion ?? WORKFLOW_SCHEMA_VERSION) as typeof WORKFLOW_SCHEMA_VERSION;
 }
@@ -4315,6 +4446,8 @@ function canLoadWorkflowWithValidationIssues(errors: readonly WorkflowValidation
     "invalid_lifecycle_schedule_duration",
     "lifecycle_schedule_on_unsupported_phase",
     "missing_scheduled_handler",
+    "lifecycle_run_limit_on_unsupported_schedule",
+    "invalid_lifecycle_run_limit",
     "lifecycle_retry_on_unsupported_phase",
     "invalid_lifecycle_retry_policy",
   ]);
@@ -4378,6 +4511,7 @@ function normalizeImportedWorkflowHooks(
         const onSuccess = normalizeLifecycleHandler(hookRecord.onSuccess);
         const onFailure = normalizeLifecycleHandler(hookRecord.onFailure);
         const schedule = normalizeLifecycleSchedule(hookRecord.schedule);
+        const runLimit = normalizeLifecycleRunLimit(hookRecord.runLimit);
         const retryPolicy = normalizeLifecycleRetryPolicy(hookRecord.retryPolicy);
 
         return {
@@ -4387,6 +4521,7 @@ function normalizeImportedWorkflowHooks(
           targetId: typeof hookRecord.targetId === "string" ? hookRecord.targetId : "",
           handlerKey: handlerKey || undefined,
           schedule,
+          runLimit,
           retryPolicy,
           onSuccess,
           onFailure,
@@ -4449,6 +4584,14 @@ function normalizeLifecycleSchedule(value: unknown): WorkflowLifecycleHookSchedu
   }
 
   return { ...(value as Record<string, unknown>) } as WorkflowLifecycleHookSchedule;
+}
+
+function normalizeLifecycleRunLimit(value: unknown): WorkflowLifecycleHookRunLimit | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  return { ...(value as Record<string, unknown>) } as WorkflowLifecycleHookRunLimit;
 }
 
 function normalizeLifecycleRetryPolicy(value: unknown): WorkflowLifecycleHookRetryPolicy | undefined {
