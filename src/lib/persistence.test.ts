@@ -106,7 +106,7 @@ describe("IndexedDB definition library storage", () => {
     const saved = await storage.saveStateWorkflowDefinition(bundle);
 
     expect(saved.key).toBe("stateWorkflowDefinition:scan_job_state@0.1.0");
-    expect(saved.definition.schemaVersion).toBe("1.0.0");
+    expect(saved.definition.schemaVersion).toBe("2.0.0");
     expect(saved.definition.workflowDefinition.id).toBe("scan_job_workflow");
     expect(await storage.getStateWorkflowDefinition(saved.key)).toEqual(saved);
     expect((await storage.listStateWorkflowDefinitions()).map((record) => record.key)).toEqual([saved.key]);

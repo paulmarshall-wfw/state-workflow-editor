@@ -4,9 +4,9 @@ This document defines the JSON files imported and exported by State Workflow Edi
 
 Current new export format:
 
-- State workflow definition bundle: `schemaVersion: "1.0.0"`
+- State workflow definition bundle: `schemaVersion: "2.0.0"`
 
-The editor no longer exports standalone state-machine files, linked workflow files, or old `embeddedStateMachineDefinition` bundled workflow files. Old bundled workflow files remain importable as compatibility-only input and are normalized in memory into the strict `1.0.0` bundle shape.
+The editor no longer exports standalone state-machine files, linked workflow files, old `schemaVersion: "1.0.0"` strict bundles, or old `embeddedStateMachineDefinition` bundled workflow files. Strict `1.0.0` bundles and old bundled workflow files remain importable as compatibility-only input and are normalized in memory into the strict `2.0.0` bundle shape.
 
 ## File Type
 
@@ -30,7 +30,7 @@ Browser-local Library storage uses IndexedDB records keyed from definition IDs a
 
 ```json
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "2.0.0",
   "appName": "Example App",
   "id": "scan_job_state",
   "definitionVersion": "0.1.0",
@@ -157,6 +157,20 @@ Workflow definitions are app-facing metadata validated against the embedded stat
 - Automatic actions must be hidden from user controls.
 - Action-level `processing` and handler keys are not part of the current export shape.
 
+Runtime consumers should use `workflowDefinition.id` as the runtime `workflowId`. The runtime default `variantKey` is `"default"` and is not exported by this editor.
+
+### Runtime Import Notes
+
+Runtime importers should treat bundle schema `2.0.0` separately from workflow schema `0.8.0`. The bundle schema describes the outer editor file format; the workflow schema semantics are represented by the nested workflow fields and the runtime's validator model.
+
+Runtime mapping:
+
+- Top-level `id` is the state-machine definition ID.
+- Top-level `definitionVersion` is the shared definition version used to reconstruct validator-compatible state-machine and workflow records.
+- `workflowDefinition.id` is the runtime `workflowId`.
+- `variantKey` is runtime-owned and defaults to `"default"` when importing editor JSON.
+- Nested metadata stripped by the editor should be reconstructed only for validation or runtime projection; it should not be required in the imported JSON.
+
 ### Buckets
 
 ```json
@@ -227,9 +241,10 @@ Old split state-machine and workflow Library records are not migrated into canon
 
 The definition import control accepts:
 
-- strict `schemaVersion: "1.0.0"` state workflow definition bundles
+- strict `schemaVersion: "2.0.0"` state workflow definition bundles
+- compatibility strict `schemaVersion: "1.0.0"` state workflow definition bundles
 - old bundled workflow exports that include `embeddedStateMachineDefinition`
 
 Standalone state-machine files and linked workflow files are rejected by the strict import path.
 
-When an old bundled workflow is imported, the editor validates the embedded state-machine definition and normalizes the old workflow fields into the strict bundle shape. New exports always use `schemaVersion: "1.0.0"` and never emit old linked or bundled workflow formats.
+When a compatibility `1.0.0` bundle or old bundled workflow is imported, the editor validates and normalizes it into the current strict bundle shape. New exports always use `schemaVersion: "2.0.0"` and never emit `1.0.0`, old linked workflow, or old bundled workflow formats.

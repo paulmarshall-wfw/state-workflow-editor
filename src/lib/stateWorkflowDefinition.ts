@@ -15,7 +15,11 @@ import {
   validateWorkflowDefinition,
 } from "./workflow";
 
-export const STATE_WORKFLOW_DEFINITION_SCHEMA_VERSION = "1.0.0" as const;
+export const STATE_WORKFLOW_DEFINITION_SCHEMA_VERSION = "2.0.0" as const;
+const COMPATIBLE_STATE_WORKFLOW_DEFINITION_SCHEMA_VERSIONS = [
+  STATE_WORKFLOW_DEFINITION_SCHEMA_VERSION,
+  "1.0.0",
+] as const;
 
 export type StateWorkflowDefinitionSchemaVersion = typeof STATE_WORKFLOW_DEFINITION_SCHEMA_VERSION;
 
@@ -184,7 +188,7 @@ export function normalizeStateWorkflowDefinitionBundle(
 
   const record = value as Record<string, unknown>;
 
-  if (record.schemaVersion === STATE_WORKFLOW_DEFINITION_SCHEMA_VERSION) {
+  if (isStrictBundleRecord(record)) {
     return normalizeStrictBundle(record);
   }
 
@@ -323,6 +327,17 @@ function bundleWorkflowError(error: WorkflowValidationError): StateWorkflowDefin
 
 function isLegacyBundledWorkflowRecord(record: Record<string, unknown>) {
   return Boolean(record.embeddedStateMachineDefinition) && Array.isArray(record.actions) && Array.isArray(record.buckets);
+}
+
+function isStrictBundleRecord(record: Record<string, unknown>) {
+  return (
+    typeof record.schemaVersion === "string" &&
+    COMPATIBLE_STATE_WORKFLOW_DEFINITION_SCHEMA_VERSIONS.includes(
+      record.schemaVersion as (typeof COMPATIBLE_STATE_WORKFLOW_DEFINITION_SCHEMA_VERSIONS)[number],
+    ) &&
+    Boolean(record.stateMachineDefinition) &&
+    Boolean(record.workflowDefinition)
+  );
 }
 
 function readRecord(value: unknown): Record<string, unknown> {

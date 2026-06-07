@@ -8,7 +8,7 @@
 - prepared by: Codex
 - repository, workspace, or folder: `/Users/paulmarshall/Software Development/state-workflow-engine`
 - branch or working context: `main`
-- session scope: refreshed continuity after implementing strict state workflow definition bundles from `docs/plans/00 Strict State Workflow Definition Bundles.md`.
+- session scope: bumped the strict state workflow definition bundle schema to `2.0.0`, preserved `1.0.0` compatibility input, and documented the runtime import work needed for the new bundle contract.
 
 ### Checkpoint Status
 
@@ -19,18 +19,17 @@
   - `docs/app-synopsis.md`
   - `docs/completed-tasks.md`
   - `docs/json-file-formats.md`
+  - `"docs/plans/Runtime Library Support For While-In-State 0.8.0.md"`
   - `handoff.md`
   - `src/App.test.tsx`
   - `src/App.tsx`
-  - `src/lib/index.ts`
   - `src/lib/persistence.test.ts`
-  - `src/lib/persistence.ts`
+  - `src/lib/stateWorkflowDefinition.test.ts`
+  - `src/lib/stateWorkflowDefinition.ts`
 - Dirty files intentionally out of scope:
   - None
 - Untracked files intentionally in scope:
-  - `"docs/plans/00 Strict State Workflow Definition Bundles.md"`
-  - `src/lib/stateWorkflowDefinition.test.ts`
-  - `src/lib/stateWorkflowDefinition.ts`
+  - `"docs/plans/Runtime Library Support For Strict Bundle 2.0.0.md"`
 - Untracked files intentionally out of scope:
   - None
 - Canonical files described:
@@ -40,18 +39,18 @@
   - `docs/completed-tasks.md`
   - `docs/json-file-formats.md`
   - `docs/plans/00 Strict State Workflow Definition Bundles.md`
+  - `docs/plans/Runtime Library Support For Strict Bundle 2.0.0.md`
+  - `docs/plans/Runtime Library Support For While-In-State 0.8.0.md`
   - `handoff.md`
   - `src/App.test.tsx`
   - `src/App.tsx`
-  - `src/lib/index.ts`
   - `src/lib/persistence.test.ts`
-  - `src/lib/persistence.ts`
   - `src/lib/stateWorkflowDefinition.test.ts`
   - `src/lib/stateWorkflowDefinition.ts`
 - Last verification:
-  - command: `npm run verify`
-  - result: passed with `96 passed | 29 skipped`; build passed with the existing Vite large-chunk warning
-  - timestamp UTC: earlier in this implementation session; exact command timestamp not captured in repo
+  - command: `git diff --check`
+  - result: passed after the runtime-facing documentation update
+  - timestamp UTC: `2026-06-07T03:37:52Z`
 - Handoff freshness: `fresh-to-dirty-tree`
 - Safe-to-continue basis: the current dirty tree contains the completed strict-bundle implementation, tests, docs, completed-task ledger entry, and this handoff refresh; every dirty and untracked file is accounted for above.
 - Next checkpoint action: review skipped tests, review final diff, then commit or intentionally leave the dirty tree for review.
@@ -62,12 +61,13 @@ The current focus is the strict state workflow definition bundle rollout.
 
 Complete now:
 
-- Current export format is a single `StateWorkflowDefinitionBundle` with top-level `schemaVersion: "1.0.0"`, `appName`, `definitionVersion`, `stateMachineDefinition`, and `workflowDefinition`.
+- Current export format is a single `StateWorkflowDefinitionBundle` with top-level `schemaVersion: "2.0.0"`, `appName`, `definitionVersion`, `stateMachineDefinition`, and `workflowDefinition`.
 - The app now saves, imports, exports, and lists single definition records instead of split state-machine and workflow records.
 - Export filenames now use `(target-app)-(definition-version)-state-workflow-definition.json`.
-- Old bundled workflow files with embedded state-machine definitions normalize into the strict bundle shape for compatibility.
+- Strict `1.0.0` bundles and old bundled workflow files with embedded state-machine definitions normalize into the current strict `2.0.0` bundle shape for compatibility.
 - Standalone state-machine files and linked workflow files are rejected by strict definition import.
 - README, `docs/json-file-formats.md`, `docs/app-synopsis.md`, tests, and `docs/completed-tasks.md` are updated for the new contract.
+- Runtime-facing docs now include `docs/plans/Runtime Library Support For Strict Bundle 2.0.0.md`, plus a cross-reference from the existing workflow schema `0.8.0` runtime plan.
 
 Incomplete now:
 
@@ -87,13 +87,13 @@ Immediate goal: review, test-clean up if desired, and commit the strict state wo
 
 Intended finished state: the editor exposes a single authoritative state workflow definition JSON contract while preserving compatibility import for older bundled workflow files.
 
-Definition of done for this workstream: keep `src/lib/stateWorkflowDefinition.ts`, persistence, app UI, tests, README, `docs/json-file-formats.md`, `docs/app-synopsis.md`, `docs/completed-tasks.md`, and `handoff.md` aligned around bundle schema `1.0.0`; then commit or explicitly preserve the dirty tree.
+Definition of done for this workstream: keep `src/lib/stateWorkflowDefinition.ts`, persistence, app UI, tests, README, `docs/json-file-formats.md`, `docs/app-synopsis.md`, `docs/completed-tasks.md`, and `handoff.md` aligned around bundle schema `2.0.0`; then commit or explicitly preserve the dirty tree.
 
 ## 4. Current State
 
 ### Working
 
-- `STATE_WORKFLOW_DEFINITION_SCHEMA_VERSION` is `1.0.0`.
+- `STATE_WORKFLOW_DEFINITION_SCHEMA_VERSION` is `2.0.0`.
 - `createStateWorkflowDefinitionBundle`, `validateStateWorkflowDefinitionBundle`, `normalizeStateWorkflowDefinitionBundle`, `buildValidationStateMachineDefinition`, and `buildValidationWorkflowDefinition` are exported from `src/lib/stateWorkflowDefinition.ts`.
 - Strict bundle export strips nested state-machine and workflow version metadata and maps top-level `definitionVersion` back internally for existing validators.
 - IndexedDB storage schema is version `2` and includes a `stateWorkflowDefinitions` store keyed by `stateWorkflowDefinition:<id>@<definitionVersion>`.
@@ -115,7 +115,7 @@ Definition of done for this workstream: keep `src/lib/stateWorkflowDefinition.ts
 ### Not Yet Verified
 
 - No manual Chrome smoke test was run after the strict-bundle UI changes.
-- No downstream consumer compatibility check was run for the strict bundle format.
+- No downstream runtime implementation or consumer compatibility check was run for the strict bundle format.
 - No release packaging, tagging, publishing, or AppLauncher manifest refresh was performed.
 
 ## 5. Active Constraints
@@ -123,7 +123,8 @@ Definition of done for this workstream: keep `src/lib/stateWorkflowDefinition.ts
 - Keep the state-machine core project-agnostic.
 - Keep workflow actions, guards, side effects, authorization, persistence, logging, jobs, retries, idempotency, and runtime orchestration out of the state-machine core unless a later approved plan changes the boundary.
 - The visual editor may author state workflow definitions, but it must not turn the state-machine layer into the workflow layer.
-- Current exports must use the strict `schemaVersion: "1.0.0"` state workflow definition bundle.
+- Current exports must use the strict `schemaVersion: "2.0.0"` state workflow definition bundle.
+- Strict `schemaVersion: "1.0.0"` state workflow definition bundles are compatibility input only and normalize forward in memory.
 - Old bundled workflow files are compatibility imports only; standalone state-machine files and linked workflow files are intentionally rejected by strict import.
 - `schemaVersion` is file-format version; `definitionVersion` is the user-controlled definition version.
 - Use numbered versions only; do not use `latest`.
@@ -142,13 +143,21 @@ npm run build
 npm run verify
 ```
 
-Latest verification:
+Latest full verification:
 
 ```sh
 npm run verify
 ```
 
-Result: passed earlier in this implementation session with `96 passed | 29 skipped`; build passed with the existing Vite large-chunk warning.
+Result: passed at `2026-06-07T01:35:28Z` with `99 passed | 29 skipped`; build passed with the existing Vite large-chunk warning.
+
+Latest docs-only verification:
+
+```sh
+git diff --check
+```
+
+Result: passed at `2026-06-07T03:37:52Z` after the runtime-facing documentation update.
 
 Known non-blocking output:
 
@@ -168,6 +177,8 @@ This checkout does not have a repo-local `scripts/` directory.
 
 - `AGENTS.md`: repo-local standards and state/workflow boundary constraints.
 - `"docs/plans/00 Strict State Workflow Definition Bundles.md"`: source plan for the completed slice.
+- `"docs/plans/Runtime Library Support For Strict Bundle 2.0.0.md"`: runtime implementation plan for accepting strict bundle `2.0.0`.
+- `"docs/plans/Runtime Library Support For While-In-State 0.8.0.md"`: runtime implementation plan for workflow schema `0.8.0` scheduling semantics.
 - `src/lib/stateWorkflowDefinition.ts`: strict bundle schema, validation, normalization, and legacy compatibility mapping.
 - `src/App.tsx`: single-definition import/save/export UI and Library state.
 - `src/lib/persistence.ts`: IndexedDB schema version `2` and definition store.
@@ -190,10 +201,11 @@ Blocked:
 
 Later:
 
+- Implement the runtime strict bundle `2.0.0` import plan in `/Users/paulmarshall/Software Development/state-workflow-runtime`.
 - Update downstream target-app integration docs or consumers to prefer the strict bundle artifact.
 - Decide whether AppLauncher manifests need a follow-up schema/version refresh for this editor.
 - Decide whether Vite chunk-size warnings need code-splitting work.
 
 ## 9. Ready-Made Prompt for Starting a New Thread
 
-Read `handoff.md` as hot context. The repo is on `main` at `d546e76`, with the strict state workflow definition bundle implementation dirty and intentionally in scope. Open `AGENTS.md`, `docs/plans/00 Strict State Workflow Definition Bundles.md`, `src/lib/stateWorkflowDefinition.ts`, `src/App.tsx`, `src/lib/persistence.ts`, `src/App.test.tsx`, `src/lib/stateWorkflowDefinition.test.ts`, README, and `docs/json-file-formats.md`. Preserve the boundary that this editor authors definitions only; host apps own runtime execution, timers, jobs, persistence, authorization, logging, retries, and idempotency. Current export schema is `StateWorkflowDefinitionBundle` `1.0.0`. Start by reviewing skipped tests or committing the dirty tree, and distinguish confirmed current state from new recommendations.
+Read `handoff.md` as hot context. The repo is on `main` at `d546e76`, with the strict state workflow definition bundle implementation and runtime-facing docs dirty and intentionally in scope. Open `AGENTS.md`, `docs/plans/00 Strict State Workflow Definition Bundles.md`, `docs/plans/Runtime Library Support For Strict Bundle 2.0.0.md`, `docs/plans/Runtime Library Support For While-In-State 0.8.0.md`, `src/lib/stateWorkflowDefinition.ts`, `src/App.tsx`, `src/lib/persistence.ts`, `src/App.test.tsx`, `src/lib/stateWorkflowDefinition.test.ts`, README, and `docs/json-file-formats.md`. Preserve the boundary that this editor authors definitions only; host apps own runtime execution, timers, jobs, persistence, authorization, logging, retries, and idempotency. Current export schema is `StateWorkflowDefinitionBundle` `2.0.0`; strict `1.0.0` bundles are compatibility input. Start by reviewing skipped tests or committing the dirty tree, and distinguish confirmed current state from new recommendations.

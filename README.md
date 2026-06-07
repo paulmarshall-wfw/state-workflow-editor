@@ -41,7 +41,7 @@ The dedicated format reference is [docs/json-file-formats.md](docs/json-file-for
 
 ```json
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "2.0.0",
   "appName": "Example App",
   "id": "scan_job_state",
   "definitionVersion": "0.1.0",
@@ -106,7 +106,7 @@ For example: `stateWorkflowDefinition:scan_job_state@0.1.0`.
 
 The Library page can save the current definition, load saved records, duplicate records as new versions, and delete records.
 
-Imports load into the current workspace draft only. They do not create saved Library records until the user explicitly saves them. Strict bundle imports are current. Old bundled workflow files with `embeddedStateMachineDefinition` remain importable as compatibility-only input and are normalized in memory; standalone state-machine files and linked workflow files are rejected by the strict import path.
+Imports load into the current workspace draft only. They do not create saved Library records until the user explicitly saves them. Strict `2.0.0` bundle imports are current. Strict `1.0.0` bundles and old bundled workflow files with `embeddedStateMachineDefinition` remain importable as compatibility-only input and are normalized in memory; standalone state-machine files and linked workflow files are rejected by the strict import path.
 
 ## Target App Integration Model
 
@@ -116,7 +116,7 @@ The exported workflow is a contract, not an executable workflow engine. Buckets 
 
 State-machine `entryStates` are project-agnostic contract metadata that nominate states a target app may treat as valid creation or start states. They are distinct from the editor's currently selected state and from workflow actions. Empty `entryStates` arrays are valid and mean the state-machine definition does not nominate entry states. Entry states do not imply runtime record creation behavior, guards, authorization, persistence, or transition execution.
 
-Actions describe how a valid transition is initiated. Actions are grounded in the state-machine states and legal transitions, not in bucket placement. Action `id` is the stable runtime/audit identifier; `label` is the visible button text. Generated/default IDs are starting points and should be edited to semantic app-facing IDs when needed. Audit consumers should store the exact workflow action `id`, previous state, and new state. A `user` action must be visible. An `automatic` action must be hidden from user controls. Actions do not carry handler keys in the strict `1.0.0` bundle schema.
+Actions describe how a valid transition is initiated. Actions are grounded in the state-machine states and legal transitions, not in bucket placement. Action `id` is the stable runtime/audit identifier; `label` is the visible button text. Generated/default IDs are starting points and should be edited to semantic app-facing IDs when needed. Audit consumers should store the exact workflow action `id`, previous state, and new state. Runtime consumers should use `workflowDefinition.id` as the runtime `workflowId`; runtime `variantKey` defaults to `"default"` and is not exported by the editor. A `user` action must be visible. An `automatic` action must be hidden from user controls. Actions do not carry handler keys in the strict `2.0.0` bundle schema.
 
 Lifecycle hooks describe optional app-specific processing points. Supported phases are `before_transition` for action-targeted pre-transition work, `on_state_entry` for state-entry work, `while_in_state` for scheduled work while an item remains in a state, and `on_terminal_entry` for terminal-state entry work. Each hook may define a main `handlerKey`, plus optional success and failure handler keys. `while_in_state` hooks must define a schedule using `after_duration` with `delayMs`, `every_interval` with `intervalMs`, or `daily` with local target-app wall-clock `timeOfDay` in `HH:mm` format. Recurring `every_interval` and `daily` schedules may define `runLimit.maxRuns`, which caps scheduled handler executions during a single state residency. Retry metadata with `maxAttempts` and `delayMs` is separate and applies to attempts for a failed scheduled execution. These keys and schedules are identifiers and contract metadata for the target app; this editor does not execute timers, evaluate due hooks, retry work, choose timezone or daylight-saving behavior, catch up missed executions, persist scheduler state, or guarantee state changes from success or failure.
 

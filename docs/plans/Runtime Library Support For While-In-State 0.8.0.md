@@ -4,6 +4,8 @@
 
 Update `/Users/paulmarshall/Software Development/state-workflow-runtime` so it can import and execute workflow schema `0.8.0` exports from State Workflow Editor.
 
+Related later editor contract: after strict state workflow definition bundles were bumped to top-level `schemaVersion: "2.0.0"`, runtime import work should also apply `docs/plans/Runtime Library Support For Strict Bundle 2.0.0.md`. This document remains the workflow schema `0.8.0` scheduling plan; the strict bundle plan covers the outer editor file format, `workflowDefinition.id` to runtime `workflowId` mapping, and runtime default `variantKey: "default"`.
+
 The editor now authors two new pieces of `while_in_state` contract metadata:
 
 - `daily` schedules: `{ "trigger": "daily", "timeOfDay": "HH:mm" }`

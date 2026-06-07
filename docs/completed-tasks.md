@@ -37,3 +37,13 @@ Append brief entries here when project work is completed. Keep this file concise
   Outcome: Added `schemaVersion: "1.0.0"` state workflow definition bundles, switched app import/save/export and Library persistence to single definition records, updated public format docs, and kept old bundled workflow imports as compatibility-only normalization.
   Verification: `npm run verify` passed with `96 passed | 29 skipped`; build passed with the existing Vite large-chunk warning.
   Traceability: `main` at `d546e76`; changed `src/lib/stateWorkflowDefinition.ts`, `src/App.tsx`, `src/lib/persistence.ts`, `src/lib/index.ts`, tests, README, `docs/app-synopsis.md`, and `docs/json-file-formats.md`; plan source is `"docs/plans/00 Strict State Workflow Definition Bundles.md"`.
+
+- Task: Bump strict state workflow definition bundle schema to 2.0.0
+  Outcome: New exports and Library saves now emit strict bundle `schemaVersion: "2.0.0"` with the same field shape, strict `1.0.0` bundles normalize forward as compatibility input, and docs describe `workflowDefinition.id` as the runtime `workflowId` while `variantKey` remains runtime-defaulted.
+  Verification: `npm test -- --run src/lib/stateWorkflowDefinition.test.ts src/lib/persistence.test.ts src/App.test.tsx` passed; `npm run verify` passed with `99 passed | 29 skipped`; build passed with the existing Vite large-chunk warning.
+  Traceability: `main` at `adc682c`; changed `src/lib/stateWorkflowDefinition.ts`, `src/App.tsx`, tests, README, `docs/app-synopsis.md`, `docs/json-file-formats.md`, and `handoff.md`.
+
+- Task: Document runtime strict bundle 2.0.0 support requirements
+  Outcome: Added a runtime-facing implementation plan for strict bundle `schemaVersion: "2.0.0"`, including `workflowDefinition.id` to runtime `workflowId`, default `variantKey: "default"`, strict `1.0.0` compatibility input, and workflow schema `0.8.0` preservation requirements; cross-linked it from the existing runtime `0.8.0` schedule plan.
+  Verification: `git diff --check` passed.
+  Traceability: `main` at `adc682c`; changed `docs/json-file-formats.md`, `docs/plans/Runtime Library Support For While-In-State 0.8.0.md`, `docs/plans/Runtime Library Support For Strict Bundle 2.0.0.md`, `docs/completed-tasks.md`, and `handoff.md`.

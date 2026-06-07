@@ -472,9 +472,60 @@ describe("App", () => {
       timeStyle: "short",
     }).format(new Date(definitionRecord.savedAt));
 
-    expect(definitionRecord.definition.schemaVersion).toBe("1.0.0");
+    expect(definitionRecord.definition.schemaVersion).toBe("2.0.0");
     expect(definitionRecord.definition.workflowDefinition.id).toBe("scan_job_workflow");
     expect(screen.getByTitle(definitionRecord.savedAt)).toHaveTextContent(`Saved ${formattedSavedAt}`);
+  });
+
+  it("loads saved strict 1.0.0 Library bundles through compatibility normalization", async () => {
+    const fakeIndexedDb = createFakeIndexedDb();
+
+    fakeIndexedDb.database.createObjectStore("stateWorkflowDefinitions");
+    fakeIndexedDb.database.stores.get("stateWorkflowDefinitions")?.records.set("stateWorkflowDefinition:legacy_state@0.1.0", {
+      key: "stateWorkflowDefinition:legacy_state@0.1.0",
+      storageSchemaVersion: 2,
+      savedAt: "2026-06-07T00:00:00.000Z",
+      definition: {
+        schemaVersion: "1.0.0",
+        appName: "Legacy Project",
+        id: "legacy_state",
+        definitionVersion: "0.1.0",
+        stateMachineDefinition: {
+          id: "legacy_state",
+          states: ["queued", "done"],
+          entryStates: ["queued"],
+          terminalStates: ["done"],
+          transitions: [{ from: "queued", to: "done" }],
+        },
+        workflowDefinition: {
+          id: "legacy_workflow",
+          states: [
+            { id: "queued", visible: true },
+            { id: "done", visible: true },
+          ],
+          actions: [{ id: "finish", label: "Finish", from: "queued", to: "done", trigger: "user", visible: true }],
+          buckets: [],
+          hooks: [],
+        },
+      },
+    });
+    Object.defineProperty(window, "indexedDB", {
+      configurable: true,
+      value: fakeIndexedDb,
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Library" }));
+    expect(await screen.findByText("Legacy Project")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Load" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workflow ID")).toHaveValue("legacy_workflow");
+    });
+    expect(screen.getByLabelText("State Machine")).toHaveValue("legacy_state@0.1.0");
   });
 
   it.skip("upgrades saved current draft and Library workflows from schema 0.7.0 when loading", async () => {
@@ -570,7 +621,7 @@ describe("App", () => {
     await clickWorkflowAction(user, "Export Definition");
     let workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
 
-    expect(workflowExport.schemaVersion).toBe("1.0.0");
+    expect(workflowExport.schemaVersion).toBe("2.0.0");
     expect(workflowExport.workflowDefinition.id).toBe("draft_workflow");
 
     await user.click(screen.getByRole("button", { name: "Library" }));
@@ -583,7 +634,7 @@ describe("App", () => {
     await clickWorkflowAction(user, "Export Definition");
     workflowExport = JSON.parse(await readBlobText(write.mock.calls[1][0] as Blob));
 
-    expect(workflowExport.schemaVersion).toBe("1.0.0");
+    expect(workflowExport.schemaVersion).toBe("2.0.0");
     expect(workflowExport.workflowDefinition.id).toBe("library_workflow");
   });
 
@@ -1132,7 +1183,7 @@ describe("App", () => {
     });
     const stateMachineExport = JSON.parse(await readBlobText(write.mock.calls[0][0]));
 
-    expect(stateMachineExport.schemaVersion).toBe("1.0.0");
+    expect(stateMachineExport.schemaVersion).toBe("2.0.0");
     expect(stateMachineExport.stateMachineDefinition.entryStates).toEqual([]);
 
     await user.click(screen.getByRole("button", { name: "Workflow" }));
@@ -1388,7 +1439,7 @@ describe("App", () => {
 
     const exported = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
 
-    expect(exported.schemaVersion).toBe("1.0.0");
+    expect(exported.schemaVersion).toBe("2.0.0");
     expect(exported.states).toEqual(["queued", "failed", "running", "completed", "cancelled"]);
     expect(exported.entryStates).toEqual(["queued"]);
     expect(exported.terminalStates).toEqual(["completed", "cancelled"]);
@@ -2153,7 +2204,7 @@ describe("App", () => {
     await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
     const workflowExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
 
-    expect(workflowExport.schemaVersion).toBe("1.0.0");
+    expect(workflowExport.schemaVersion).toBe("2.0.0");
     expect(workflowExport.workflowDefinition.hooks).toEqual([
       {
         id: "while_in_state_failed",
@@ -2216,9 +2267,9 @@ describe("App", () => {
       },
     ];
 
-    expect(linkedExport.schemaVersion).toBe("1.0.0");
+    expect(linkedExport.schemaVersion).toBe("2.0.0");
     expect(linkedExport.workflowDefinition.hooks).toEqual(expectedHooks);
-    expect(bundledExport.schemaVersion).toBe("1.0.0");
+    expect(bundledExport.schemaVersion).toBe("2.0.0");
     expect(bundledExport.workflowDefinition.hooks).toEqual(expectedHooks);
     expect(bundledExport.embeddedStateMachineDefinition.id).toBe("scan_job_state");
   });
@@ -2597,7 +2648,7 @@ describe("App", () => {
     const linkedExport = JSON.parse(await readBlobText(write.mock.calls[0][0] as Blob));
     const bundledExport = JSON.parse(await readBlobText(write.mock.calls[1][0] as Blob));
 
-    expect(linkedExport.schemaVersion).toBe("1.0.0");
+    expect(linkedExport.schemaVersion).toBe("2.0.0");
     expect(linkedExport.workflowDefinition.states).toEqual([
       { id: "queued", visible: true },
       { id: "running", visible: true },

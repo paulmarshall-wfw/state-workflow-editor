@@ -1192,7 +1192,14 @@ export function App() {
         return;
       }
 
-      const loaded = applyStateWorkflowDefinitionBundle(record.definition);
+      const normalizedBundle = normalizeStateWorkflowDefinitionBundle(record.definition);
+
+      if (!normalizedBundle) {
+        setLibraryMessage(`Definition ${record.key} uses an unsupported schema.`);
+        return;
+      }
+
+      const loaded = applyStateWorkflowDefinitionBundle(normalizedBundle);
 
       if (loaded) {
         setActivePage("workflow");
@@ -1218,7 +1225,14 @@ export function App() {
         return;
       }
 
-      const nextVersion = window.prompt("New definition version", record.definition.definitionVersion);
+      const normalizedBundle = normalizeStateWorkflowDefinitionBundle(record.definition);
+
+      if (!normalizedBundle) {
+        setLibraryMessage(`Definition ${record.key} uses an unsupported schema.`);
+        return;
+      }
+
+      const nextVersion = window.prompt("New definition version", normalizedBundle.definitionVersion);
 
       if (!nextVersion) {
         setLibraryMessage("Definition duplicate cancelled.");
@@ -1226,7 +1240,7 @@ export function App() {
       }
 
       const nextBundle = {
-        ...record.definition,
+        ...normalizedBundle,
         definitionVersion: nextVersion.trim(),
       };
       const result = validateStateWorkflowDefinitionBundle(nextBundle);
