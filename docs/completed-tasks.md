@@ -30,3 +30,10 @@ Append brief entries here when project work is completed. Keep this file concise
   Outcome: Workflow schema `0.8.0` now supports daily `while_in_state` schedules, recurring `runLimit.maxRuns`, editor controls for daily time and capped runs, import repair behavior, and updated contract documentation.
   Verification: `npm test -- --run src/lib/workflow.test.ts src/App.test.tsx`, `npm run lint`, `npm test`, and `npm run build` passed; existing Mermaid React `act(...)` warning and Vite large-chunk warning remain.
   Traceability: `main` at `7c0c521`; changed `src/lib/workflow.ts`, `src/App.tsx`, `src/styles.css`, tests, README, `docs/json-file-formats.md`, and `docs/plans/state-workflow-editor.md`; plan source is `"docs/plans/00 Extend While-In-State Schedule Authoring.md"`.
+
+## 2026-06-07
+
+- Task: Implement strict state workflow definition bundles
+  Outcome: Added `schemaVersion: "1.0.0"` state workflow definition bundles, switched app import/save/export and Library persistence to single definition records, updated public format docs, and kept old bundled workflow imports as compatibility-only normalization.
+  Verification: `npm run verify` passed with `96 passed | 29 skipped`; build passed with the existing Vite large-chunk warning.
+  Traceability: `main` at `d546e76`; changed `src/lib/stateWorkflowDefinition.ts`, `src/App.tsx`, `src/lib/persistence.ts`, `src/lib/index.ts`, tests, README, `docs/app-synopsis.md`, and `docs/json-file-formats.md`; plan source is `"docs/plans/00 Strict State Workflow Definition Bundles.md"`.

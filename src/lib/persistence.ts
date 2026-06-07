@@ -1,13 +1,15 @@
 import { StateMachineDefinition } from "./stateMachine";
+import { StateWorkflowDefinitionBundle } from "./stateWorkflowDefinition";
 import { WorkflowDefinition } from "./workflow";
 
-export const STORAGE_SCHEMA_VERSION = 1;
+export const STORAGE_SCHEMA_VERSION = 2;
 export const CURRENT_WORKSPACE_DRAFT_KEY = "current_workspace";
 
 const databaseName = "state-workflow-editor-library";
 const draftsStoreName = "drafts";
 const stateMachinesStoreName = "stateMachineDefinitions";
 const workflowsStoreName = "workflowDefinitions";
+const stateWorkflowDefinitionsStoreName = "stateWorkflowDefinitions";
 const workflowStateMachineIndexName = "stateMachineKey";
 
 export type CurrentWorkspaceDraft<State extends string = string> = {
@@ -35,11 +37,24 @@ export type PersistedWorkflowDefinition<State extends string = string> = {
   savedAt: string;
 };
 
+export type PersistedStateWorkflowDefinition<State extends string = string> = {
+  key: string;
+  storageSchemaVersion: typeof STORAGE_SCHEMA_VERSION;
+  definition: StateWorkflowDefinitionBundle<State>;
+  savedAt: string;
+};
+
 export type DefinitionLibraryStorage = {
   loadCurrentWorkspaceDraft: () => Promise<CurrentWorkspaceDraft | null>;
   saveCurrentWorkspaceDraft: (
     draft: Omit<CurrentWorkspaceDraft, "key" | "storageSchemaVersion" | "savedAt">,
   ) => Promise<CurrentWorkspaceDraft>;
+  listStateWorkflowDefinitions: () => Promise<PersistedStateWorkflowDefinition[]>;
+  getStateWorkflowDefinition: (key: string) => Promise<PersistedStateWorkflowDefinition | null>;
+  saveStateWorkflowDefinition: (
+    definition: StateWorkflowDefinitionBundle<string>,
+  ) => Promise<PersistedStateWorkflowDefinition>;
+  deleteStateWorkflowDefinition: (key: string) => Promise<void>;
   listStateMachineDefinitions: () => Promise<PersistedStateMachineDefinition[]>;
   getStateMachineDefinition: (key: string) => Promise<PersistedStateMachineDefinition | null>;
   saveStateMachineDefinition: (
@@ -77,6 +92,12 @@ export function buildWorkflowStateMachineKey(
   return buildStateMachineDefinitionKey(stateMachineReference);
 }
 
+export function buildStateWorkflowDefinitionKey(
+  definitionOrReference: Pick<StateWorkflowDefinitionBundle<string>, "id" | "definitionVersion">,
+): string {
+  return `stateWorkflowDefinition:${definitionOrReference.id}@${definitionOrReference.definitionVersion}`;
+}
+
 export function createDefinitionLibraryStorage(indexedDb: IDBFactory = window.indexedDB): DefinitionLibraryStorage {
   return new IndexedDbDefinitionLibraryStorage(indexedDb);
 }
@@ -105,6 +126,32 @@ class IndexedDbDefinitionLibraryStorage implements DefinitionLibraryStorage {
 
     await this.putRecord(draftsStoreName, record);
     return record;
+  }
+
+  async listStateWorkflowDefinitions() {
+    const records = await this.getAllRecords<PersistedStateWorkflowDefinition>(stateWorkflowDefinitionsStoreName);
+
+    return records.sort((left, right) => compareDefinitionRecords(left, right));
+  }
+
+  async getStateWorkflowDefinition(key: string) {
+    return this.getRecord<PersistedStateWorkflowDefinition>(stateWorkflowDefinitionsStoreName, key);
+  }
+
+  async saveStateWorkflowDefinition(definition: StateWorkflowDefinitionBundle<string>) {
+    const record: PersistedStateWorkflowDefinition = {
+      key: buildStateWorkflowDefinitionKey(definition),
+      storageSchemaVersion: STORAGE_SCHEMA_VERSION,
+      definition: cloneJson(definition),
+      savedAt: new Date().toISOString(),
+    };
+
+    await this.putRecord(stateWorkflowDefinitionsStoreName, record);
+    return record;
+  }
+
+  async deleteStateWorkflowDefinition(key: string) {
+    await this.deleteRecord(stateWorkflowDefinitionsStoreName, key);
   }
 
   async listStateMachineDefinitions() {
@@ -225,6 +272,10 @@ class IndexedDbDefinitionLibraryStorage implements DefinitionLibraryStorage {
           if (workflowStore && !workflowStore.indexNames.contains(workflowStateMachineIndexName)) {
             workflowStore.createIndex(workflowStateMachineIndexName, workflowStateMachineIndexName, { unique: false });
           }
+        }
+
+        if (!database.objectStoreNames.contains(stateWorkflowDefinitionsStoreName)) {
+          database.createObjectStore(stateWorkflowDefinitionsStoreName, { keyPath: "key" });
         }
       };
 

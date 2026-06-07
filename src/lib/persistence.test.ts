@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   buildStateMachineDefinitionKey,
+  buildStateWorkflowDefinitionKey,
   buildWorkflowDefinitionKey,
   buildWorkflowStateMachineKey,
   createDefinitionLibraryStorage,
 } from "./persistence";
 import { StateMachineDefinition } from "./stateMachine";
+import { createStateWorkflowDefinitionBundle } from "./stateWorkflowDefinition";
 import { WORKFLOW_SCHEMA_VERSION, WorkflowDefinition } from "./workflow";
 
 const stateMachineDefinition: StateMachineDefinition<string> = {
@@ -49,6 +51,9 @@ const workflowDefinition: WorkflowDefinition<string> = {
 describe("persistence keys", () => {
   it("builds stable composite keys for state machines and workflows", () => {
     expect(buildStateMachineDefinitionKey(stateMachineDefinition)).toBe("stateMachine:scan_job_state@0.1.0");
+    expect(buildStateWorkflowDefinitionKey(createStateWorkflowDefinitionBundle(stateMachineDefinition, workflowDefinition))).toBe(
+      "stateWorkflowDefinition:scan_job_state@0.1.0",
+    );
     expect(buildWorkflowStateMachineKey(workflowDefinition.stateMachine)).toBe("stateMachine:scan_job_state@0.1.0");
     expect(buildWorkflowDefinitionKey(workflowDefinition)).toBe(
       "workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0",
@@ -93,6 +98,22 @@ describe("IndexedDB definition library storage", () => {
     expect(savedWorkflows[0].definition.actions).toEqual(workflowDefinition.actions);
     expect(savedWorkflows[0].definition.buckets).toEqual(workflowDefinition.buckets);
     expect(savedWorkflows[0].definition.hooks).toEqual(workflowDefinition.hooks);
+  });
+
+  it("stores strict state workflow definition bundles as single library records", async () => {
+    const storage = createDefinitionLibraryStorage(createFakeIndexedDb());
+    const bundle = createStateWorkflowDefinitionBundle(stateMachineDefinition, workflowDefinition);
+    const saved = await storage.saveStateWorkflowDefinition(bundle);
+
+    expect(saved.key).toBe("stateWorkflowDefinition:scan_job_state@0.1.0");
+    expect(saved.definition.schemaVersion).toBe("1.0.0");
+    expect(saved.definition.workflowDefinition.id).toBe("scan_job_workflow");
+    expect(await storage.getStateWorkflowDefinition(saved.key)).toEqual(saved);
+    expect((await storage.listStateWorkflowDefinitions()).map((record) => record.key)).toEqual([saved.key]);
+
+    await storage.deleteStateWorkflowDefinition(saved.key);
+
+    expect(await storage.getStateWorkflowDefinition(saved.key)).toBeNull();
   });
 
   it("overwrites records by composite key and deletes them explicitly", async () => {

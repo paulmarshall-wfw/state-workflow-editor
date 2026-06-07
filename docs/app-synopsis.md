@@ -10,9 +10,9 @@ State Workflow Editor is for developers, product owners, and workflow designers 
 
 ## What It Does
 
-The app lets users create and validate project-agnostic state-machine definitions with states, entry states, terminal states, and legal transitions. It also lets users create linked workflow definitions with user or automatic actions, visible labels, bucket presentation metadata, state visibility, lifecycle hooks, schedules, retry metadata, and bundled exports that include the embedded state-machine definition.
+The app lets users create and validate project-agnostic state-machine sections with states, entry states, terminal states, and legal transitions. It also lets users create workflow sections with user or automatic actions, visible labels, bucket presentation metadata, state visibility, lifecycle hooks, schedules, and retry metadata. New imports, exports, and saved Library records use one strict state workflow definition bundle with `schemaVersion: "1.0.0"` and one top-level `definitionVersion`.
 
-Definitions can be imported and exported as formatted JSON files. The browser-local Library stores saved state-machine definitions and their linked workflow definitions in IndexedDB, while the current workspace draft can be recovered between sessions. Mermaid previews show the model visually, and the editor keeps schema validation visible while definitions are being authored.
+Definitions can be imported and exported as formatted JSON files. The browser-local Library stores saved state workflow definition bundles in IndexedDB, while the current workspace draft can be recovered between sessions. Mermaid previews show the model visually, and the editor keeps schema validation visible while definitions are being authored.
 
 ## How To Use It
 
@@ -23,7 +23,7 @@ npm install
 npm run dev
 ```
 
-Open the Vite development server, which defaults to `http://127.0.0.1:5174/`. Use the State Machine page to set the target app, definition version, state IDs, entry states, terminal states, and transitions. Use the Workflow page to define actions, buckets, and lifecycle hooks linked to the current state machine. Use the Library page to save, load, duplicate, or delete browser-local records. Export state-machine, workflow, or bundled workflow JSON when the target app is ready to consume the contract.
+Open the Vite development server, which defaults to `http://127.0.0.1:5174/`. Use the State Machine page to set the target app, definition version, state IDs, entry states, terminal states, and transitions. Use the Workflow page to define actions, buckets, and lifecycle hooks validated against the current state machine. Use the Library page to save, load, duplicate, or delete browser-local bundle records. Export Definition when the target app is ready to consume the contract.
 
 For local verification, run:
 
@@ -35,6 +35,6 @@ npm run verify
 
 The app is built with TypeScript, React, Vite, Mermaid, Vitest, and browser-local IndexedDB persistence. The package version source of truth is `package.json`; the current private project checkpoint is `1.0.7`.
 
-The state-machine contract currently exports schema `0.3.0` and validates app name, definition version, state IDs, entry states, terminal states, duplicate states, unknown transition references, duplicate transitions, and terminal-state transition rules. The workflow contract currently exports schema `0.7.0` and validates linked state-machine identity, action IDs and labels, legal action transitions, trigger and visibility rules, buckets, workflow state presentation, lifecycle hook targets, schedules, and retry metadata.
+The current exported contract is the strict state workflow definition bundle schema `1.0.0`. It validates app name, definition version, state IDs, entry states, terminal states, duplicate states, unknown transition references, duplicate transitions, terminal-state transition rules, action IDs and labels, legal action transitions, trigger and visibility rules, buckets, workflow state presentation, lifecycle hook targets, schedules, run limits, and retry metadata.
 
 The reusable core lives in `src/lib/`, while the browser editor lives in `src/App.tsx` with styling in `src/styles.css`. The app uses the File System Access API for saves when supported and falls back to browser downloads. It keeps workflow/runtime boundaries explicit: exported JSON is contract metadata, not executable orchestration.

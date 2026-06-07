@@ -35,177 +35,88 @@ npm run verify
 - `docs/plans/`: approved planning artifacts
 - `.github/workflows/verify.yml`: CI verification baseline
 
-## State-Machine Definition Format
+## State Workflow Definition Bundle Format
 
 The dedicated format reference is [docs/json-file-formats.md](docs/json-file-formats.md). This README keeps a shorter working example.
 
 ```json
 {
-  "schemaVersion": "0.3.0",
+  "schemaVersion": "1.0.0",
   "appName": "Example App",
-  "definitionVersion": "0.1.0",
   "id": "scan_job_state",
-  "states": ["queued", "running", "completed", "failed", "cancelled"],
-  "entryStates": ["queued"],
-  "terminalStates": ["completed", "cancelled"],
-  "transitions": [
-    { "from": "queued", "to": "running" },
-    { "from": "running", "to": "completed" }
-  ]
+  "definitionVersion": "0.1.0",
+  "stateMachineDefinition": {
+    "id": "scan_job_state",
+    "states": ["queued", "running", "completed", "failed", "cancelled"],
+    "entryStates": ["queued"],
+    "terminalStates": ["completed", "cancelled"],
+    "transitions": [
+      { "from": "queued", "to": "running" },
+      { "from": "running", "to": "completed" }
+    ]
+  },
+  "workflowDefinition": {
+    "id": "scan_job_workflow",
+    "states": [
+      { "id": "queued", "visible": true },
+      { "id": "running", "visible": true },
+      { "id": "completed", "visible": true }
+    ],
+    "actions": [
+      {
+        "id": "scan.start",
+        "label": "Start",
+        "from": "queued",
+        "to": "running",
+        "trigger": "user",
+        "visible": true
+      }
+    ],
+    "buckets": [],
+    "hooks": []
+  }
 }
 ```
 
-`schemaVersion` is the definition file-format version. `definitionVersion` is the user-controlled version of the state definition and is separate from the app version in `package.json`.
+`schemaVersion` is the bundle file-format version. `definitionVersion` is the one user-controlled version for both nested sections and is separate from the app version in `package.json`. New exports do not include nested state-machine or workflow version fields.
 
 Exported filenames use:
 
 ```text
-(target-app)-(definition-version)-state-specification.json
+(target-app)-(definition-version)-state-workflow-definition.json
 ```
 
-For example: `example-project-0.1.0-state-specification.json`.
+For example: `example-project-0.1.0-state-workflow-definition.json`.
 
 The editor prefers slug-like Target App values such as `state-workflow-engine`. The folder picker reads `package.json` from the selected project folder first, using `name` and stripping package scopes such as `@scope/state-workflow-engine` to `state-workflow-engine`. If no suitable package name exists, it uses the selected folder name when already slug-like, then a slug-like `.app-dashboard.json` `name`, then a conservative slug conversion of the folder name. Folder paths and handles are not stored or exported.
 
-## Workflow Definition Format
-
-The current linked and bundled workflow JSON contracts are defined in [docs/json-file-formats.md](docs/json-file-formats.md).
-
-Workflow definitions keep their own `id` and `workflowVersion` separate. The linked state-machine identity is the pair `stateMachine.id` plus `stateMachine.definitionVersion`.
-
-```json
-{
-  "schemaVersion": "0.8.0",
-  "appName": "Example App",
-  "workflowVersion": "0.1.0",
-  "id": "scan_job_workflow",
-  "stateMachine": {
-    "id": "scan_job_state",
-    "definitionVersion": "0.1.0"
-  },
-  "states": [
-    { "id": "queued", "visible": true },
-    { "id": "running", "visible": true },
-    { "id": "completed", "visible": true },
-    { "id": "failed", "visible": false },
-    { "id": "cancelled", "visible": true }
-  ],
-  "actions": [
-    {
-      "id": "scan.start",
-      "label": "Start",
-      "from": "queued",
-      "to": "running",
-      "trigger": "user",
-      "visible": true
-    },
-    {
-      "id": "scan.fail",
-      "label": "Fail",
-      "from": "running",
-      "to": "failed",
-      "trigger": "automatic",
-      "visible": false
-    }
-  ],
-  "buckets": [
-    {
-      "id": "waiting",
-      "label": "Waiting",
-      "visible": true,
-      "states": ["queued"]
-    },
-    {
-      "id": "active",
-      "label": "Active",
-      "visible": true,
-      "states": ["running", "failed"]
-    },
-    {
-      "id": "finished",
-      "label": "Finished",
-      "visible": true,
-      "states": ["completed", "cancelled"]
-    }
-  ],
-  "hooks": [
-    {
-      "id": "before_transition_start",
-      "phase": "before_transition",
-      "targetType": "action",
-      "targetId": "scan.start",
-      "handlerKey": "start_scan",
-      "onSuccess": { "handlerKey": "start_scan_success" },
-      "onFailure": { "handlerKey": "start_scan_failure" }
-    },
-    {
-      "id": "on_state_entry_running",
-      "phase": "on_state_entry",
-      "targetType": "state",
-      "targetId": "running",
-      "handlerKey": "run_scan"
-    },
-    {
-      "id": "while_in_state_failed",
-      "phase": "while_in_state",
-      "targetType": "state",
-      "targetId": "failed",
-      "handlerKey": "recheck_failed",
-      "schedule": { "trigger": "every_interval", "intervalMs": 900000 },
-      "runLimit": { "maxRuns": 12 },
-      "retryPolicy": { "maxAttempts": 3, "delayMs": 60000 }
-    }
-  ]
-}
-```
-
-Workflow buckets, state visibility, action visibility, action trigger mode, lifecycle handler keys, while-in-state schedules, recurring run limits, and retry policies are exported contract metadata. Action IDs use stable lowercase dotted identifier segments, while action labels are visible button text. Bucket IDs, hook IDs, and handler keys use lowercase snake_case and labels are required for buckets and actions. Buckets are optional UI presentation metadata: a workflow may have no buckets, empty buckets, or partial bucket assignments without invalidating actions. Lifecycle hooks are optional app-processing metadata and may target action or state lifecycle points. `while_in_state` hooks require a handler key and a schedule; schedule metadata is allowed only on `while_in_state`. Recurring schedules may use `runLimit.maxRuns` to cap scheduled handler executions for one state residency. Exports always include the `buckets` and `hooks` arrays, even when either one is empty. Imports from older `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, and `0.7.0` workflow files are upgraded in memory with visible workflow states, user-visible actions by default, empty hooks by default, and legacy `action.processing.handlerKey` values converted to `before_transition` lifecycle hooks; new exports use workflow schema `0.8.0`.
-
-Linked workflow exports use:
-
-```text
-(target-app)-(workflow-version)-workflow-definition.json
-```
-
-Bundled workflow exports include `embeddedStateMachineDefinition` and use:
-
-```text
-(target-app)-(workflow-version)-workflow-definition-bundled.json
-```
+Workflow buckets, state visibility, action visibility, action trigger mode, lifecycle handler keys, while-in-state schedules, recurring run limits, and retry policies are exported contract metadata. Action IDs use stable lowercase dotted identifier segments, while action labels are visible button text. Bucket IDs, hook IDs, and handler keys use lowercase snake_case and labels are required for buckets and actions. Buckets are optional UI presentation metadata: a workflow may have no buckets, empty buckets, or partial bucket assignments without invalidating actions. Lifecycle hooks are optional app-processing metadata and may target action or state lifecycle points. `while_in_state` hooks require a handler key and a schedule; schedule metadata is allowed only on `while_in_state`. Recurring schedules may use `runLimit.maxRuns` to cap scheduled handler executions for one state residency.
 
 ## Browser Library Storage
 
-The editor keeps a browser-local IndexedDB Library for saved definitions and a recoverable current workspace draft. The saved Library is separate from import/export JSON: storage metadata is not included in normal exported files. Saved workflow records and current workspace drafts from older workflow schemas are upgraded in memory when loaded; the stored record is rewritten only when the user saves or duplicates it.
+The editor keeps a browser-local IndexedDB Library for saved definitions and a recoverable current workspace draft. The saved Library is separate from import/export JSON: storage metadata is not included in normal exported files.
 
-Saved state-machine definitions are keyed by the exact definition identity:
-
-```text
-stateMachine:(state-machine-id)@(definition-version)
-```
-
-For example: `stateMachine:scan_job_state@0.1.0`.
-
-Saved workflow definitions are scoped under the exact state-machine version they reference:
+Saved state workflow definition bundles are keyed by the exact definition identity:
 
 ```text
-workflow:(state-machine-id)@(definition-version)/(workflow-id)@(workflow-version)
+stateWorkflowDefinition:(definition-id)@(definition-version)
 ```
 
-For example: `workflow:scan_job_state@0.1.0/scan_job_workflow@0.1.0`.
+For example: `stateWorkflowDefinition:scan_job_state@0.1.0`.
 
-The Library page can save the current state machine, save the current workflow, load saved records, duplicate records as new versions, and delete records. A workflow can only be saved after its linked state-machine version is saved. A state-machine version cannot be deleted while saved workflows still reference it.
+The Library page can save the current definition, load saved records, duplicate records as new versions, and delete records.
 
-Imports load into the current workspace draft only. They do not create saved Library records until the user explicitly saves them.
+Imports load into the current workspace draft only. They do not create saved Library records until the user explicitly saves them. Strict bundle imports are current. Old bundled workflow files with `embeddedStateMachineDefinition` remain importable as compatibility-only input and are normalized in memory; standalone state-machine files and linked workflow files are rejected by the strict import path.
 
 ## Target App Integration Model
 
-A target app is an app that ingests a state-machine definition and workflow definition exported from this editor, then uses those definitions to configure its own workflow engine for its own work items. Work items are intentionally documentation-only here: they might be photos, articles, orders, or any other target-app record, but this editor does not define work-item schemas, storage, ownership, authorization, or app data models.
+A target app is an app that ingests a state workflow definition bundle exported from this editor, then uses its state-machine and workflow sections to configure its own workflow engine for its own work items. Work items are intentionally documentation-only here: they might be photos, articles, orders, or any other target-app record, but this editor does not define work-item schemas, storage, ownership, authorization, or app data models.
 
 The exported workflow is a contract, not an executable workflow engine. Buckets and state visibility describe an optional user-facing workflow surface that a target app may render. Hidden or missing buckets and hidden states remain valid contract metadata choices and do not affect whether actions are valid.
 
 State-machine `entryStates` are project-agnostic contract metadata that nominate states a target app may treat as valid creation or start states. They are distinct from the editor's currently selected state and from workflow actions. Empty `entryStates` arrays are valid and mean the state-machine definition does not nominate entry states. Entry states do not imply runtime record creation behavior, guards, authorization, persistence, or transition execution.
 
-Actions describe how a valid transition is initiated. Actions are grounded in the state-machine states and legal transitions, not in bucket placement. Action `id` is the stable runtime/audit identifier; `label` is the visible button text. Generated/default IDs are starting points and should be edited to semantic app-facing IDs when needed. Audit consumers should store the exact workflow action `id`, previous state, and new state. A `user` action must be visible. An `automatic` action must be hidden from user controls. Actions do not carry handler keys in schema `0.8.0`.
+Actions describe how a valid transition is initiated. Actions are grounded in the state-machine states and legal transitions, not in bucket placement. Action `id` is the stable runtime/audit identifier; `label` is the visible button text. Generated/default IDs are starting points and should be edited to semantic app-facing IDs when needed. Audit consumers should store the exact workflow action `id`, previous state, and new state. A `user` action must be visible. An `automatic` action must be hidden from user controls. Actions do not carry handler keys in the strict `1.0.0` bundle schema.
 
 Lifecycle hooks describe optional app-specific processing points. Supported phases are `before_transition` for action-targeted pre-transition work, `on_state_entry` for state-entry work, `while_in_state` for scheduled work while an item remains in a state, and `on_terminal_entry` for terminal-state entry work. Each hook may define a main `handlerKey`, plus optional success and failure handler keys. `while_in_state` hooks must define a schedule using `after_duration` with `delayMs`, `every_interval` with `intervalMs`, or `daily` with local target-app wall-clock `timeOfDay` in `HH:mm` format. Recurring `every_interval` and `daily` schedules may define `runLimit.maxRuns`, which caps scheduled handler executions during a single state residency. Retry metadata with `maxAttempts` and `delayMs` is separate and applies to attempts for a failed scheduled execution. These keys and schedules are identifiers and contract metadata for the target app; this editor does not execute timers, evaluate due hooks, retry work, choose timezone or daylight-saving behavior, catch up missed executions, persist scheduler state, or guarantee state changes from success or failure.
 
@@ -220,7 +131,7 @@ Failure handling, timers, due-work records, retries, logging, authorization, ide
 - The Target App control includes a folder picker that updates both state-machine and workflow app names.
 - The State Machine page uses three independently scrolling columns: states, selected-state transitions, and a read-only Mermaid preview. State rows include Entry and Terminal markers. Mermaid previews default to vertical top-to-bottom layout and include a local horizontal/vertical direction toggle.
 - The Workflow page has Actions, Buckets, and Lifecycle views. Actions maps stable action IDs and visible button labels onto legal state-machine transitions and lets users set trigger mode and user visibility. Buckets lets users edit bucket names directly, toggle bucket visibility, add states to the selected bucket from an all-state dropdown, toggle workflow-level state visibility, and remove states from the selected bucket. Lifecycle lets users add app-specific handler keys for before-transition, state-entry, while-in-state, and terminal-entry phases, with interval, duration, daily time, optional recurring run-limit, and optional retry controls for while-in-state hooks plus optional success and failure handler metadata. All workflow views retain the action-labelled Mermaid preview and the same local horizontal/vertical direction toggle; in Buckets view, the selected bucket's states use solid boundaries while all other states use dotted boundaries.
-- The Library page manages browser-local saved state-machine definitions and their exact-version linked workflow definitions.
+- The Library page manages browser-local saved state workflow definition bundles.
 
 ## Core API
 
@@ -234,6 +145,9 @@ isEntryState(machine, state);
 isTerminalState(machine, state);
 validateWorkflowDefinition(workflow, stateMachineDefinition);
 defineWorkflow(workflow, stateMachineDefinition);
+createStateWorkflowDefinitionBundle(stateMachineDefinition, workflowDefinition);
+validateStateWorkflowDefinitionBundle(bundle);
+normalizeStateWorkflowDefinitionBundle(value);
 getAllowedActions(workflow, currentState);
 getActionTargetState(workflow, actionId);
 ```

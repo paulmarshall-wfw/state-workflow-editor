@@ -2,178 +2,125 @@
 
 This document defines the JSON files imported and exported by State Workflow Editor.
 
-Current exported file-format versions:
+Current new export format:
 
-- State-machine definition: `schemaVersion: "0.3.0"`
-- Workflow definition: `schemaVersion: "0.8.0"`
-- Bundled workflow definition: `schemaVersion: "0.8.0"` plus `embeddedStateMachineDefinition`
+- State workflow definition bundle: `schemaVersion: "1.0.0"`
 
-`schemaVersion` is the file-format version. `definitionVersion` and `workflowVersion` are user-controlled SemVer values for the authored definitions. They are separate from the app/package version in `package.json`.
+The editor no longer exports standalone state-machine files, linked workflow files, or old `embeddedStateMachineDefinition` bundled workflow files. Old bundled workflow files remain importable as compatibility-only input and are normalized in memory into the strict `1.0.0` bundle shape.
 
-## File Types
+## File Type
 
-| File type | Export button | Filename pattern | Embeds state machine | Normal export includes |
-| --- | --- | --- | --- | --- |
-| State-machine definition | Export State Machine | `(target-app)-(definition-version)-state-specification.json` | Not applicable | State IDs, entry states, terminal states, legal transitions |
-| Workflow definition | Export Workflow | `(target-app)-(workflow-version)-workflow-definition.json` | No | State visibility, actions, buckets, lifecycle hooks |
-| Bundled workflow definition | Export Bundled Workflow | `(target-app)-(workflow-version)-workflow-definition-bundled.json` | Yes | Workflow definition plus full state-machine definition |
+| File type | Export button | Filename pattern | Normal export includes |
+| --- | --- | --- | --- |
+| State workflow definition bundle | Export Definition | `(target-app)-(definition-version)-state-workflow-definition.json` | One state-machine definition section plus one workflow definition section |
 
 All export paths write formatted JSON with a trailing newline. The editor uses the File System Access API when available and falls back to a browser download.
 
-Browser-local Library storage uses IndexedDB records keyed from definition IDs and versions, but those storage keys are not part of the exported JSON formats.
+Browser-local Library storage uses IndexedDB records keyed from definition IDs and versions, but those storage keys are not part of exported JSON.
 
 ## Common Rules
 
 - IDs use lowercase letters, numbers, and underscores, and must start with a lowercase letter.
-- `definitionVersion` and `workflowVersion` must be numbered SemVer values such as `0.1.0`.
+- Action IDs use lowercase dotted identifier segments, such as `memo.accept`.
+- `definitionVersion` must be a numbered SemVer value such as `0.1.0`.
 - Target app names are exported in `appName`.
 - The app does not export local folder paths, browser file handles, app settings, logo URL, theme, runtime state, work items, logs, jobs, authorization, persistence, or handler implementations.
 
-## State-Machine Definition
+## Strict Bundle Shape
+
+```json
+{
+  "schemaVersion": "1.0.0",
+  "appName": "Example App",
+  "id": "scan_job_state",
+  "definitionVersion": "0.1.0",
+  "stateMachineDefinition": {
+    "id": "scan_job_state",
+    "states": ["queued", "running", "completed", "failed", "cancelled"],
+    "entryStates": ["queued"],
+    "terminalStates": ["completed", "cancelled"],
+    "transitions": [
+      { "from": "queued", "to": "running" },
+      { "from": "running", "to": "completed" },
+      { "from": "running", "to": "failed" },
+      { "from": "running", "to": "cancelled" }
+    ]
+  },
+  "workflowDefinition": {
+    "id": "scan_job_workflow",
+    "states": [
+      { "id": "queued", "visible": true },
+      { "id": "running", "visible": true },
+      { "id": "completed", "visible": true },
+      { "id": "failed", "visible": false },
+      { "id": "cancelled", "visible": true }
+    ],
+    "actions": [
+      {
+        "id": "scan.start",
+        "label": "Start",
+        "from": "queued",
+        "to": "running",
+        "trigger": "user",
+        "visible": true
+      }
+    ],
+    "buckets": [
+      {
+        "id": "active",
+        "label": "Active",
+        "visible": true,
+        "states": ["running", "failed"]
+      }
+    ],
+    "hooks": [
+      {
+        "id": "while_in_state_failed",
+        "phase": "while_in_state",
+        "targetType": "state",
+        "targetId": "failed",
+        "handlerKey": "recheck_failed",
+        "schedule": { "trigger": "every_interval", "intervalMs": 900000 },
+        "runLimit": { "maxRuns": 12 },
+        "retryPolicy": { "maxAttempts": 3, "delayMs": 60000 }
+      }
+    ]
+  }
+}
+```
+
+The top-level `definitionVersion` is the only authored version in the exported JSON. The nested `stateMachineDefinition` and `workflowDefinition` sections do not include their own `schemaVersion`, `definitionVersion`, `workflowVersion`, `stateMachine`, or `embeddedStateMachineDefinition` fields. Internally, the editor maps the bundle version onto the existing state-machine and workflow validators.
+
+## State-Machine Section
 
 State-machine definitions are the project-agnostic core contract. They define only valid states, nominated entry states, terminal states, and legal state-to-state transitions.
 
-```json
-{
-  "schemaVersion": "0.3.0",
-  "appName": "Example App",
-  "definitionVersion": "0.1.0",
-  "id": "scan_job_state",
-  "states": ["queued", "running", "completed", "failed", "cancelled"],
-  "entryStates": ["queued"],
-  "terminalStates": ["completed", "cancelled"],
-  "transitions": [
-    { "from": "queued", "to": "running" },
-    { "from": "running", "to": "completed" },
-    { "from": "running", "to": "failed" },
-    { "from": "running", "to": "cancelled" }
-  ]
-}
-```
-
-### Fields
-
 | Field | Required | Description |
 | --- | --- | --- |
-| `schemaVersion` | Yes | Must be `"0.3.0"` for current exports. |
-| `appName` | Yes | Human-facing target app/project name. |
-| `definitionVersion` | Yes | User-controlled SemVer for this state-machine definition. |
-| `id` | Yes | Stable state-machine definition ID. |
+| `id` | Yes | Stable state-machine definition ID. Must match top-level `id`. |
 | `states` | Yes | Ordered list of state IDs. Must contain at least one state. |
-| `entryStates` | Yes | State IDs nominated as valid creation or start states for target-app use. Empty arrays are valid and mean no entry states are nominated. |
+| `entryStates` | Yes | State IDs nominated as valid creation or start states for target-app use. Empty arrays are valid. |
 | `terminalStates` | Yes | State IDs that have no outgoing transitions. Each must exist in `states`. |
 | `transitions` | Yes | Legal transitions between states. Each `from` and `to` must exist in `states`. |
 
-`entryStates` are metadata only. They are distinct from the editor's selected state and from workflow actions, and they do not imply runtime record creation behavior, guards, authorization, persistence, or transition execution.
+Validation rules:
 
-### Validation
-
-- `states` cannot be empty.
-- State IDs must be lowercase snake_case identifiers.
-- State IDs must be unique.
-- Entry states must be listed in `states`.
-- Entry state entries must be unique.
-- Terminal states must be listed in `states`.
-- Terminal state entries must be unique.
-- Transitions must reference known states.
-- Duplicate transitions are invalid.
+- State IDs must be lowercase snake_case identifiers and unique.
+- Entry and terminal states must be listed in `states`.
+- Transitions must reference known states and must be unique.
 - Terminal states cannot have outgoing transitions.
 
-## Workflow Definition
+`entryStates` are metadata only. They do not imply runtime record creation behavior, guards, authorization, persistence, or transition execution.
 
-Workflow definitions are app-facing contracts linked to a state-machine definition by `stateMachine.id` and `stateMachine.definitionVersion`.
+## Workflow Section
 
-```json
-{
-  "schemaVersion": "0.8.0",
-  "appName": "Example App",
-  "workflowVersion": "0.1.0",
-  "id": "scan_job_workflow",
-  "stateMachine": {
-    "id": "scan_job_state",
-    "definitionVersion": "0.1.0"
-  },
-  "states": [
-    { "id": "queued", "visible": true },
-    { "id": "running", "visible": true },
-    { "id": "completed", "visible": true },
-    { "id": "failed", "visible": false },
-    { "id": "cancelled", "visible": true }
-  ],
-  "actions": [
-    {
-      "id": "scan.start",
-      "label": "Start",
-      "from": "queued",
-      "to": "running",
-      "trigger": "user",
-      "visible": true
-    },
-    {
-      "id": "scan.fail",
-      "label": "Fail",
-      "from": "running",
-      "to": "failed",
-      "trigger": "automatic",
-      "visible": false
-    }
-  ],
-  "buckets": [
-    {
-      "id": "waiting",
-      "label": "Waiting",
-      "visible": true,
-      "states": ["queued"]
-    },
-    {
-      "id": "active",
-      "label": "Active",
-      "visible": true,
-      "states": ["running", "failed"]
-    }
-  ],
-  "hooks": [
-    {
-      "id": "before_transition_start",
-      "phase": "before_transition",
-      "targetType": "action",
-      "targetId": "scan.start",
-      "handlerKey": "start_scan",
-      "onSuccess": { "handlerKey": "start_scan_success" },
-      "onFailure": { "handlerKey": "start_scan_failure" }
-    },
-    {
-      "id": "on_state_entry_running",
-      "phase": "on_state_entry",
-      "targetType": "state",
-      "targetId": "running",
-      "handlerKey": "run_scan"
-    },
-    {
-      "id": "while_in_state_failed",
-      "phase": "while_in_state",
-      "targetType": "state",
-      "targetId": "failed",
-      "handlerKey": "recheck_failed",
-      "schedule": { "trigger": "every_interval", "intervalMs": 900000 },
-      "runLimit": { "maxRuns": 12 },
-      "retryPolicy": { "maxAttempts": 3, "delayMs": 60000 }
-    }
-  ]
-}
-```
-
-### Fields
+Workflow definitions are app-facing metadata validated against the embedded state-machine section.
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `schemaVersion` | Yes | Must be `"0.8.0"` for current exports. |
-| `appName` | Yes | Human-facing target app/project name. |
-| `workflowVersion` | Yes | User-controlled SemVer for this workflow definition. |
 | `id` | Yes | Stable workflow definition ID. |
-| `stateMachine` | Yes | Linked state-machine reference. Its `id` and `definitionVersion` must match the loaded or embedded state-machine definition. |
-| `states` | Yes | One workflow presentation entry for every state in the linked state machine. |
-| `actions` | Yes | Named actions mapped to legal state-machine transitions. Action `id` is the stable runtime/audit identifier; `label` is visible button text. |
+| `states` | Yes | One workflow presentation entry for every state in the state-machine section. |
+| `actions` | Yes | Named actions mapped to legal state-machine transitions. |
 | `buckets` | Yes | Optional presentation groups. Exported as `[]` when no buckets exist. |
 | `hooks` | Yes | Optional lifecycle handler metadata. Exported as `[]` when no hooks exist. |
 
@@ -183,8 +130,8 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
 { "id": "queued", "visible": true }
 ```
 
-- `id` must reference a state in the linked state machine.
-- Every linked state must have one workflow state presentation entry.
+- `id` must reference a state in the state-machine section.
+- Every state-machine state must have one workflow state presentation entry.
 - `visible` controls presentation only. Hidden states remain valid workflow states.
 
 ### Actions
@@ -200,17 +147,15 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
 }
 ```
 
-- `id` must be unique and use lowercase dotted identifier segments, such as `memo.accept` or `accepted.reopen_as_memo`.
+- `id` must be unique and use lowercase dotted identifier segments.
 - `label` is required and is the visible button text.
-- Generated/default action IDs are starting points; edit them to semantic app-facing IDs before using them as durable runtime or audit identifiers.
-- Audit consumers should store the exact workflow action `id`, plus the previous state and new state.
-- `from` and `to` must exist in the linked state machine.
-- `from -> to` must be a legal state-machine transition.
+- `from` and `to` must exist in the state-machine section.
+- `from -> to` must be a legal transition.
 - Actions cannot start from terminal states.
 - `trigger` must be `"user"` or `"automatic"`.
 - User-triggered actions must be visible.
 - Automatic actions must be hidden from user controls.
-- Current workflow exports do not include action-level `processing` or handler keys.
+- Action-level `processing` and handler keys are not part of the current export shape.
 
 ### Buckets
 
@@ -226,37 +171,12 @@ Workflow definitions are app-facing contracts linked to a state-machine definiti
 - `id` must be unique and lowercase snake_case.
 - `label` is required.
 - `visible` controls presentation only.
-- `states` entries must exist in the linked state machine.
+- `states` entries must exist in the state-machine section.
 - Buckets are optional presentation metadata. Empty buckets, partial assignments, and duplicate state assignments across buckets do not affect action validity.
 
 ### Lifecycle Hooks
 
 Lifecycle hooks are optional app-processing metadata. The editor validates and exports them, but does not execute handlers, timers, retries, jobs, or due-work records. Host apps own runtime evaluation.
-
-```json
-{
-  "id": "before_transition_start",
-  "phase": "before_transition",
-  "targetType": "action",
-  "targetId": "start",
-  "handlerKey": "start_scan",
-  "onSuccess": { "handlerKey": "start_scan_success" },
-  "onFailure": { "handlerKey": "start_scan_failure" }
-}
-```
-
-| Field | Required | Description |
-| --- | --- | --- |
-| `id` | Yes | Unique lifecycle hook ID. |
-| `phase` | Yes | Lifecycle phase. |
-| `targetType` | Yes | `"action"` for `before_transition`; `"state"` for state lifecycle phases. |
-| `targetId` | Yes | Action ID or state ID, depending on `targetType`. |
-| `handlerKey` | No | Main target-app handler key. |
-| `schedule` | For `while_in_state` only | Schedule metadata for while-in-state hooks. |
-| `runLimit` | For recurring `while_in_state` schedules only | Optional cap on scheduled handler executions during one state residency. |
-| `retryPolicy` | For `while_in_state` only | Optional target-app retry metadata for scheduled hooks. |
-| `onSuccess.handlerKey` | No | Optional target-app success handler key. |
-| `onFailure.handlerKey` | No | Optional target-app failure handler key. |
 
 Supported phases:
 
@@ -269,9 +189,7 @@ Supported phases:
 
 Hook IDs and handler keys must be lowercase snake_case identifiers. A workflow cannot define two hooks for the same `phase`, `targetType`, and `targetId`.
 
-Scheduled hooks require a valid `handlerKey`. Only `while_in_state` hooks may define `schedule`; schedules on `before_transition`, `on_state_entry`, or `on_terminal_entry` are invalid.
-Only recurring `while_in_state` schedules may define `runLimit`; run limits on `after_duration` or non-scheduled phases are invalid.
-Only `while_in_state` hooks may define `retryPolicy`; retry metadata on other phases is invalid.
+Only `while_in_state` hooks may define `schedule`; schedules on other phases are invalid. Scheduled hooks require a valid `handlerKey`.
 
 Supported schedule shapes:
 
@@ -281,146 +199,37 @@ Supported schedule shapes:
 | `every_interval` | `{ "trigger": "every_interval", "intervalMs": number }` | `intervalMs` must be a positive integer in milliseconds. |
 | `daily` | `{ "trigger": "daily", "timeOfDay": "HH:mm" }` | `timeOfDay` must be 24-hour local target-app wall-clock time with no timezone field. |
 
+Recurring `every_interval` and `daily` schedules may define `runLimit.maxRuns`, which caps scheduled handler executions during one state residency. `retryPolicy.maxAttempts` and `retryPolicy.delayMs` describe target-app retry metadata for one scheduled execution and are separate from `runLimit`.
+
 Target apps decide timezone, daylight-saving behavior, catch-up behavior, missed executions, scheduler persistence, and any due-work record model for `daily` schedules.
-
-Optional recurring run-limit shape:
-
-```json
-{ "maxRuns": 12 }
-```
-
-- `maxRuns` must be a positive integer.
-- The cap is per state residency: after an item enters the target state, scheduled handler executions stop once `maxRuns` executions have run while the item remains in that state.
-- `runLimit` is valid only for recurring `every_interval` and `daily` schedules.
-- `runLimit.maxRuns` is separate from `retryPolicy.maxAttempts`; retry attempts count failures for one scheduled execution.
-
-Optional retry policy shape:
-
-```json
-{ "maxAttempts": 3, "delayMs": 60000 }
-```
-
-- `maxAttempts` must be a positive integer.
-- `delayMs` must be a non-negative integer in milliseconds.
-
-Example FileCatalog-style scheduled hook:
-
-```json
-{
-  "id": "while_in_state_unsupported",
-  "phase": "while_in_state",
-  "targetType": "state",
-  "targetId": "unsupported",
-  "handlerKey": "recheck_file_type_support",
-  "schedule": { "trigger": "every_interval", "intervalMs": 900000 },
-  "runLimit": { "maxRuns": 12 },
-  "retryPolicy": { "maxAttempts": 3, "delayMs": 60000 }
-}
-```
-
-## Bundled Workflow Definition
-
-A bundled workflow definition has the same workflow fields as a linked workflow definition and adds `embeddedStateMachineDefinition`.
-
-```json
-{
-  "schemaVersion": "0.8.0",
-  "appName": "Example App",
-  "workflowVersion": "0.1.0",
-  "id": "scan_job_workflow",
-  "stateMachine": {
-    "id": "scan_job_state",
-    "definitionVersion": "0.1.0"
-  },
-  "embeddedStateMachineDefinition": {
-    "schemaVersion": "0.3.0",
-    "appName": "Example App",
-    "definitionVersion": "0.1.0",
-    "id": "scan_job_state",
-    "states": ["queued", "running", "completed", "failed", "cancelled"],
-    "entryStates": ["queued"],
-    "terminalStates": ["completed", "cancelled"],
-    "transitions": [
-      { "from": "queued", "to": "running" },
-      { "from": "running", "to": "completed" }
-    ]
-  },
-  "states": [
-    { "id": "queued", "visible": true },
-    { "id": "running", "visible": true },
-    { "id": "completed", "visible": true },
-    { "id": "failed", "visible": true },
-    { "id": "cancelled", "visible": true }
-  ],
-  "actions": [],
-  "buckets": [],
-  "hooks": []
-}
-```
-
-Bundled workflow imports validate the embedded state-machine definition and load it when valid. The workflow `stateMachine.id` and `stateMachine.definitionVersion` must match the embedded state-machine definition.
 
 ## Local Library Storage
 
-The browser-local Library stores the current workspace draft plus explicitly saved definitions. Library records use `storageSchemaVersion: 1` internally. This metadata is not emitted by Export State Machine, Export Workflow, or Export Bundled Workflow.
+The browser-local Library stores the current workspace draft plus explicitly saved strict bundles. Library records use `storageSchemaVersion: 2` internally. This metadata is not emitted by Export Definition.
 
-Saved state-machine records use:
-
-```text
-stateMachine:(state-machine-id)@(definition-version)
-```
-
-Saved workflow records use:
+Saved definition records use:
 
 ```text
-workflow:(state-machine-id)@(definition-version)/(workflow-id)@(workflow-version)
+stateWorkflowDefinition:(definition-id)@(definition-version)
 ```
 
-The workflow key is scoped to the exact state-machine version in `workflow.stateMachine`. The app does not resolve workflows to a later or latest state-machine version automatically.
+For example:
 
-Valid imports update the current workspace draft. They are not saved as Library records until the user explicitly saves the state-machine or workflow definition.
+```text
+stateWorkflowDefinition:scan_job_state@0.1.0
+```
+
+Imports load into the current workspace draft. They are not saved as Library records until the user explicitly saves the definition.
+
+Old split state-machine and workflow Library records are not migrated into canonical saved records. Current workspace drafts can still be normalized in memory when loaded.
 
 ## Import Behavior
 
-### State Machine Import
+The definition import control accepts:
 
-The State Machine import control accepts `.json` state-machine definition files. The imported file is normalized into the current state-machine shape and then validated.
+- strict `schemaVersion: "1.0.0"` state workflow definition bundles
+- old bundled workflow exports that include `embeddedStateMachineDefinition`
 
-The editor accepts state-machine schema `0.2.0` imports and upgrades them in memory to current schema `0.3.0`. Missing `entryStates` becomes `[]`. Loading an old saved record does not rewrite it; the upgraded schema is saved only when the user explicitly saves or duplicates the state-machine definition.
+Standalone state-machine files and linked workflow files are rejected by the strict import path.
 
-### Workflow Import
-
-The Workflow import control accepts:
-
-- linked workflow definition JSON
-- bundled workflow definition JSON
-- state-machine definition JSON, as a convenience import that loads the state machine
-
-Linked workflow imports validate against the currently loaded state-machine definition. Bundled workflow imports validate against their embedded state-machine definition and replace the currently loaded state machine when valid.
-
-When a workflow is imported, it is reconciled to the effective state-machine definition:
-
-- missing workflow state presentation entries are added as visible
-- stale workflow state presentation entries are removed
-- actions that no longer map to a current legal transition are removed
-- stale bucket state assignments are removed
-- lifecycle hooks targeting missing actions or states are removed
-
-### Legacy Workflow Imports
-
-The editor accepts workflow schema `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, and `0.7.0` imports and upgrades them in memory to current schema `0.8.0`. Browser-local Library workflows and current workspace drafts with those schema versions are also upgraded in memory when loaded. Loading an old saved record does not rewrite it; the upgraded schema is saved only when the user saves or duplicates the workflow.
-
-Legacy normalization rules:
-
-- missing `states` becomes one visible workflow state entry per linked state
-- string state entries become `{ "id": "...", "visible": true }`
-- missing `trigger` becomes `"user"`
-- missing `visible` becomes `true` for user actions
-- missing `buckets` becomes `[]`
-- missing `hooks` becomes `[]`
-- legacy `action.processing.handlerKey` values become `before_transition` lifecycle hooks unless an explicit hook already exists for the same action
-- imported action IDs and labels are preserved exactly; label-derived suffix IDs such as `accept_2` are surfaced for manual correction rather than guessed automatically
-- imported hook `schedule`, `runLimit`, and `retryPolicy` objects are preserved closely enough for validation to report unsupported triggers, invalid durations or times, invalid run limits, and invalid retry fields
-- missing schedules are not invented for imported `while_in_state` hooks; those hooks load visibly and block workflow export until the author chooses a valid schedule and handler key
-
-New exports always use workflow schema `0.8.0`, always omit action-level `processing`, and always include `buckets` and `hooks` arrays.
+When an old bundled workflow is imported, the editor validates the embedded state-machine definition and normalizes the old workflow fields into the strict bundle shape. New exports always use `schemaVersion: "1.0.0"` and never emit old linked or bundled workflow formats.

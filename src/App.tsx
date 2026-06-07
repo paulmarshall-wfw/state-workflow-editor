@@ -12,11 +12,12 @@ import {
 import packageJson from "../package.json";
 import {
   CURRENT_WORKSPACE_DRAFT_KEY,
+  STATE_WORKFLOW_DEFINITION_SCHEMA_VERSION,
   STATE_MACHINE_SCHEMA_VERSION,
   WORKFLOW_SCHEMA_VERSION,
-  PersistedStateMachineDefinition,
-  PersistedWorkflowDefinition,
+  PersistedStateWorkflowDefinition,
   StateMachineDefinition,
+  StateWorkflowDefinitionBundle,
   WorkflowAction,
   WorkflowActionTrigger,
   WorkflowBucket,
@@ -27,13 +28,16 @@ import {
   WorkflowLifecycleHookRunLimit,
   WorkflowLifecycleHookSchedule,
   WorkflowValidationError,
-  buildStateMachineDefinitionKey,
-  buildWorkflowDefinitionKey,
-  buildWorkflowStateMachineKey,
+  buildStateWorkflowDefinitionKey,
   createDefinitionLibraryStorage,
+  createStateWorkflowDefinitionBundle,
   defineStateMachine,
   defineWorkflow,
+  buildValidationStateMachineDefinition,
+  buildValidationWorkflowDefinition,
+  normalizeStateWorkflowDefinitionBundle,
   validateStateMachineDefinition,
+  validateStateWorkflowDefinitionBundle,
   validateWorkflowDefinition,
 } from "./lib";
 
@@ -208,9 +212,8 @@ export function App() {
   const [isWorkflowValidationDialogOpen, setWorkflowValidationDialogOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(loadAppSettings);
   const [libraryMessage, setLibraryMessage] = useState<string | null>(null);
-  const [stateMachineRecords, setStateMachineRecords] = useState<PersistedStateMachineDefinition[]>([]);
-  const [workflowRecords, setWorkflowRecords] = useState<PersistedWorkflowDefinition[]>([]);
-  const [selectedLibraryStateMachineKey, setSelectedLibraryStateMachineKey] = useState<string | null>(null);
+  const [definitionRecords, setDefinitionRecords] = useState<PersistedStateWorkflowDefinition[]>([]);
+  const [selectedLibraryDefinitionKey, setSelectedLibraryDefinitionKey] = useState<string | null>(null);
   const [isLibraryReady, setLibraryReady] = useState(false);
   const stateMachineFileInputRef = useRef<HTMLInputElement | null>(null);
   const workflowFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -279,39 +282,34 @@ export function App() {
 
     return visibility;
   }, [linkedWorkflow.states]);
-  const currentStateMachineKey = buildStateMachineDefinitionKey(definition);
-  const currentWorkflowKey = buildWorkflowDefinitionKey(linkedWorkflow);
-  const selectedLibraryStateMachine =
-    stateMachineRecords.find((record) => record.key === selectedLibraryStateMachineKey) ?? stateMachineRecords[0] ?? null;
-  const selectedLibraryWorkflows = selectedLibraryStateMachine
-    ? workflowRecords.filter((record) => record.stateMachineKey === selectedLibraryStateMachine.key)
-    : [];
+  const currentDefinitionKey = buildStateWorkflowDefinitionKey({
+    id: definition.id,
+    definitionVersion: definition.definitionVersion,
+  });
+  const selectedLibraryDefinition =
+    definitionRecords.find((record) => record.key === selectedLibraryDefinitionKey) ?? definitionRecords[0] ?? null;
 
   const refreshLibrary = useCallback(
-    async (nextSelectedStateMachineKey?: string | null) => {
+    async (nextSelectedDefinitionKey?: string | null) => {
       if (!storage) {
         setLibraryReady(true);
         setLibraryMessage("Local definition library is not available in this browser.");
         return;
       }
 
-      const [nextStateMachineRecords, nextWorkflowRecords] = await Promise.all([
-        storage.listStateMachineDefinitions(),
-        storage.listWorkflowDefinitions(),
-      ]);
+      const nextDefinitionRecords = await storage.listStateWorkflowDefinitions();
 
-      setStateMachineRecords(nextStateMachineRecords);
-      setWorkflowRecords(nextWorkflowRecords);
-      setSelectedLibraryStateMachineKey((current) => {
-        if (nextSelectedStateMachineKey !== undefined) {
-          return nextSelectedStateMachineKey;
+      setDefinitionRecords(nextDefinitionRecords);
+      setSelectedLibraryDefinitionKey((current) => {
+        if (nextSelectedDefinitionKey !== undefined) {
+          return nextSelectedDefinitionKey;
         }
 
-        if (current && nextStateMachineRecords.some((record) => record.key === current)) {
+        if (current && nextDefinitionRecords.some((record) => record.key === current)) {
           return current;
         }
 
-        return nextStateMachineRecords[0]?.key ?? null;
+        return nextDefinitionRecords[0]?.key ?? null;
       });
       setLibraryReady(true);
     },
@@ -465,6 +463,7 @@ export function App() {
 
   function updateAppName(appName: string) {
     setDefinition((current) => ({ ...current, appName }));
+    setWorkflow((current) => ({ ...current, appName }));
   }
 
   function updateTargetProject(appName: string) {
@@ -474,6 +473,7 @@ export function App() {
 
   function updateDefinitionVersion(definitionVersion: string) {
     setDefinition((current) => ({ ...current, definitionVersion }));
+    setWorkflow((current) => ({ ...current, workflowVersion: definitionVersion }));
   }
 
   function addState() {
@@ -625,11 +625,11 @@ export function App() {
   }
 
   function updateWorkflowAppName(appName: string) {
-    setWorkflow((current) => ({ ...current, appName }));
+    updateAppName(appName);
   }
 
   function updateWorkflowVersion(workflowVersion: string) {
-    setWorkflow((current) => ({ ...current, workflowVersion }));
+    updateDefinitionVersion(workflowVersion);
   }
 
   function updateWorkflowId(id: string) {
@@ -1140,344 +1140,135 @@ export function App() {
     setWorkflowMessage("Workflow reset from current state machine.");
   }
 
-  async function saveCurrentStateMachineToLibrary() {
-    if (!storage) {
-      setLibraryMessage("Local definition library is not available in this browser.");
-      return;
-    }
-
-    if (!validation.valid) {
-      setLibraryMessage("Fix state-machine validation issues before saving to the Library.");
-      return;
-    }
-
-    try {
-      const existing = await storage.getStateMachineDefinition(currentStateMachineKey);
-
-      if (existing && !window.confirm(`Replace saved state machine ${currentStateMachineKey}?`)) {
-        setLibraryMessage("State-machine save cancelled.");
-        return;
-      }
-
-      const saved = await storage.saveStateMachineDefinition(definition);
-      await refreshLibrary(saved.key);
-      setLibraryMessage(`Saved state machine ${saved.key}.`);
-    } catch (error) {
-      setLibraryMessage(error instanceof Error ? error.message : "Unable to save state machine to the Library.");
-    }
-  }
-
-  async function saveCurrentWorkflowToLibrary() {
-    if (!storage) {
-      setLibraryMessage("Local definition library is not available in this browser.");
-      return;
-    }
-
-    if (!workflowValidation.valid) {
-      setLibraryMessage("Fix workflow validation issues before saving to the Library.");
-      return;
-    }
-
-    try {
-      const stateMachineKey = buildWorkflowStateMachineKey(linkedWorkflow.stateMachine);
-      const linkedStateMachine = await storage.getStateMachineDefinition(stateMachineKey);
-
-      if (!linkedStateMachine) {
-        setLibraryMessage(`Save linked state machine ${stateMachineKey} before saving this workflow.`);
-        return;
-      }
-
-      const existing = await storage.getWorkflowDefinition(currentWorkflowKey);
-
-      if (existing && !window.confirm(`Replace saved workflow ${currentWorkflowKey}?`)) {
-        setLibraryMessage("Workflow save cancelled.");
-        return;
-      }
-
-      const saved = await storage.saveWorkflowDefinition(removeEmbeddedStateMachine(linkedWorkflow));
-      await refreshLibrary(saved.stateMachineKey);
-      setLibraryMessage(`Saved workflow ${saved.key}.`);
-    } catch (error) {
-      setLibraryMessage(error instanceof Error ? error.message : "Unable to save workflow to the Library.");
-    }
-  }
-
-  async function saveCurrentStateMachineAndWorkflowToLibrary() {
+  async function saveCurrentDefinitionToLibrary() {
     if (!storage) {
       setLibraryMessage("Local definition library is not available in this browser.");
       return;
     }
 
     if (!validation.valid || !workflowValidation.valid) {
-      setLibraryMessage("Fix validation issues before saving the state machine and workflow to the Library.");
+      setLibraryMessage("Fix validation issues before saving the definition to the Library.");
       return;
     }
 
     try {
-      const existingStateMachine = await storage.getStateMachineDefinition(currentStateMachineKey);
-      const existingWorkflow = await storage.getWorkflowDefinition(currentWorkflowKey);
+      const nextBundle = createCurrentStateWorkflowDefinitionBundle(definition, linkedWorkflow);
+      const bundleValidation = validateStateWorkflowDefinitionBundle(nextBundle);
 
-      if (
-        (existingStateMachine || existingWorkflow) &&
-        !window.confirm(
-          `Replace existing saved state-machine or workflow records for ${currentStateMachineKey} and ${currentWorkflowKey}?`,
-        )
-      ) {
-        setLibraryMessage("State-machine and workflow save cancelled.");
+      if (!bundleValidation.valid) {
+        setLibraryMessage(
+          `Fix bundle validation issues before saving: ${bundleValidation.errors.map((error) => error.message).join(" ")}`,
+        );
         return;
       }
 
-      const savedStateMachine = await storage.saveStateMachineDefinition(definition);
-      const savedWorkflow = await storage.saveWorkflowDefinition(removeEmbeddedStateMachine(linkedWorkflow));
+      const existing = await storage.getStateWorkflowDefinition(currentDefinitionKey);
 
-      await refreshLibrary(savedStateMachine.key);
-      setLibraryMessage(`Saved state machine ${savedStateMachine.key} and workflow ${savedWorkflow.key}.`);
+      if (existing && !window.confirm(`Replace saved definition ${currentDefinitionKey}?`)) {
+        setLibraryMessage("Definition save cancelled.");
+        return;
+      }
+
+      const saved = await storage.saveStateWorkflowDefinition(nextBundle);
+      await refreshLibrary(saved.key);
+      setLibraryMessage(`Saved definition ${saved.key}.`);
     } catch (error) {
-      setLibraryMessage(
-        error instanceof Error ? error.message : "Unable to save state machine and workflow to the Library.",
-      );
+      setLibraryMessage(error instanceof Error ? error.message : "Unable to save definition to the Library.");
     }
   }
 
-  async function loadStateMachineFromLibrary(key: string) {
+  async function loadDefinitionFromLibrary(key: string) {
     if (!storage) {
       setLibraryMessage("Local definition library is not available in this browser.");
       return;
     }
 
     try {
-      const record = await storage.getStateMachineDefinition(key);
+      const record = await storage.getStateWorkflowDefinition(key);
 
       if (!record) {
-        setLibraryMessage(`State machine ${key} is no longer saved.`);
+        setLibraryMessage(`Definition ${key} is no longer saved.`);
         await refreshLibrary();
         return;
       }
 
-      const nextDefinition = normalizeImportedDefinition(record.definition);
-      const result = validateStateMachineDefinition(nextDefinition);
+      const loaded = applyStateWorkflowDefinitionBundle(record.definition);
 
-      if (!result.valid) {
-        setLibraryMessage(`Saved state machine is invalid: ${result.errors.map((error) => error.message).join(" ")}`);
-        return;
+      if (loaded) {
+        setActivePage("workflow");
+        setLibraryMessage(`Loaded definition ${record.key}.`);
       }
-
-      const nextWorkflow = resetWorkflowFromStateMachine(workflow, nextDefinition);
-
-      setDefinition(nextDefinition);
-      setSelectedState(nextDefinition.states[0] ?? "");
-      setWorkflow(nextWorkflow);
-      setSelectedBucketId(nextWorkflow.buckets[0]?.id ?? "");
-      setSelectedLifecycleHookId(null);
-      setActivePage("state-machine");
-      setLibraryMessage(`Loaded state machine ${record.key}.`);
     } catch (error) {
-      setLibraryMessage(error instanceof Error ? error.message : "Unable to load state machine from the Library.");
+      setLibraryMessage(error instanceof Error ? error.message : "Unable to load definition from the Library.");
     }
   }
 
-  async function loadWorkflowFromLibrary(key: string) {
+  async function duplicateDefinitionFromLibrary(key: string) {
     if (!storage) {
       setLibraryMessage("Local definition library is not available in this browser.");
       return;
     }
 
     try {
-      const record = await storage.getWorkflowDefinition(key);
+      const record = await storage.getStateWorkflowDefinition(key);
 
       if (!record) {
-        setLibraryMessage(`Workflow ${key} is no longer saved.`);
+        setLibraryMessage(`Definition ${key} is no longer saved.`);
         await refreshLibrary();
         return;
       }
 
-      const linkedStateMachine = await storage.getStateMachineDefinition(record.stateMachineKey);
-
-      if (!linkedStateMachine) {
-        setLibraryMessage(`Linked state machine ${record.stateMachineKey} must be saved before this workflow can load.`);
-        return;
-      }
-
-      const normalizedStateMachine = normalizeImportedDefinition(linkedStateMachine.definition);
-      const normalizedWorkflow = normalizeImportedWorkflowDefinition(
-        record.definition as ImportedWorkflowDefinition,
-        normalizedStateMachine,
-      );
-      const reconciliation = reconcileWorkflowToStateMachine(normalizedWorkflow, normalizedStateMachine);
-      const result = validateWorkflowDefinition(reconciliation.workflow, normalizedStateMachine);
-
-      if (!result.valid) {
-        setLibraryMessage(`Saved workflow is invalid: ${result.errors.map((error) => error.message).join(" ")}`);
-        return;
-      }
-
-      setDefinition(normalizedStateMachine);
-      setSelectedState(normalizedStateMachine.states[0] ?? "");
-      setWorkflow(removeEmbeddedStateMachine(reconciliation.workflow));
-      setSelectedBucketId(reconciliation.workflow.buckets[0]?.id ?? "");
-      setSelectedLifecycleHookId(reconciliation.workflow.hooks[0]?.id ?? null);
-      setActivePage("workflow");
-      setLibraryMessage(formatWorkflowSyncMessage(reconciliation.summary) ?? `Loaded workflow ${record.key}.`);
-    } catch (error) {
-      setLibraryMessage(error instanceof Error ? error.message : "Unable to load workflow from the Library.");
-    }
-  }
-
-  async function duplicateStateMachineVersionFromLibrary(key: string) {
-    if (!storage) {
-      setLibraryMessage("Local definition library is not available in this browser.");
-      return;
-    }
-
-    try {
-      const record = await storage.getStateMachineDefinition(key);
-
-      if (!record) {
-        setLibraryMessage(`State machine ${key} is no longer saved.`);
-        await refreshLibrary();
-        return;
-      }
-
-      const nextVersion = window.prompt("New state-machine version", record.definition.definitionVersion);
+      const nextVersion = window.prompt("New definition version", record.definition.definitionVersion);
 
       if (!nextVersion) {
-        setLibraryMessage("State-machine duplicate cancelled.");
+        setLibraryMessage("Definition duplicate cancelled.");
         return;
       }
 
-      const nextDefinition = { ...normalizeImportedDefinition(record.definition), definitionVersion: nextVersion.trim() };
-      const result = validateStateMachineDefinition(nextDefinition);
+      const nextBundle = {
+        ...record.definition,
+        definitionVersion: nextVersion.trim(),
+      };
+      const result = validateStateWorkflowDefinitionBundle(nextBundle);
 
       if (!result.valid) {
         setLibraryMessage(`New version is invalid: ${result.errors.map((error) => error.message).join(" ")}`);
         return;
       }
 
-      const nextKey = buildStateMachineDefinitionKey(nextDefinition);
-      const existing = await storage.getStateMachineDefinition(nextKey);
+      const nextKey = buildStateWorkflowDefinitionKey(nextBundle);
+      const existing = await storage.getStateWorkflowDefinition(nextKey);
 
-      if (existing && !window.confirm(`Replace saved state machine ${nextKey}?`)) {
-        setLibraryMessage("State-machine duplicate cancelled.");
+      if (existing && !window.confirm(`Replace saved definition ${nextKey}?`)) {
+        setLibraryMessage("Definition duplicate cancelled.");
         return;
       }
 
-      const saved = await storage.saveStateMachineDefinition(nextDefinition);
+      const saved = await storage.saveStateWorkflowDefinition(nextBundle);
       await refreshLibrary(saved.key);
-      setLibraryMessage(`Duplicated state machine as ${saved.key}.`);
+      setLibraryMessage(`Duplicated definition as ${saved.key}.`);
     } catch (error) {
-      setLibraryMessage(error instanceof Error ? error.message : "Unable to duplicate state-machine version.");
+      setLibraryMessage(error instanceof Error ? error.message : "Unable to duplicate definition version.");
     }
   }
 
-  async function duplicateWorkflowVersionFromLibrary(key: string) {
+  async function deleteDefinitionFromLibrary(key: string) {
     if (!storage) {
       setLibraryMessage("Local definition library is not available in this browser.");
       return;
     }
 
     try {
-      const record = await storage.getWorkflowDefinition(key);
-
-      if (!record) {
-        setLibraryMessage(`Workflow ${key} is no longer saved.`);
-        await refreshLibrary();
+      if (!window.confirm(`Delete saved definition ${key}?`)) {
+        setLibraryMessage("Definition delete cancelled.");
         return;
       }
 
-      const nextVersion = window.prompt("New workflow version", record.definition.workflowVersion);
-
-      if (!nextVersion) {
-        setLibraryMessage("Workflow duplicate cancelled.");
-        return;
-      }
-
-      const linkedStateMachine = await storage.getStateMachineDefinition(record.stateMachineKey);
-      if (!linkedStateMachine) {
-        setLibraryMessage(`Linked state machine ${record.stateMachineKey} must be saved before this workflow can be duplicated.`);
-        return;
-      }
-
-      const normalizedStateMachine = normalizeImportedDefinition(linkedStateMachine.definition);
-      const normalizedWorkflow = normalizeImportedWorkflowDefinition(
-        record.definition as ImportedWorkflowDefinition,
-        normalizedStateMachine,
-      );
-      const nextWorkflow = { ...normalizedWorkflow, workflowVersion: nextVersion.trim() };
-      const result = validateWorkflowDefinition(nextWorkflow, normalizedStateMachine);
-
-      if (!result.valid) {
-        setLibraryMessage(`New workflow version is invalid: ${result.errors.map((error) => error.message).join(" ")}`);
-        return;
-      }
-
-      const nextKey = buildWorkflowDefinitionKey(nextWorkflow);
-      const existing = await storage.getWorkflowDefinition(nextKey);
-
-      if (existing && !window.confirm(`Replace saved workflow ${nextKey}?`)) {
-        setLibraryMessage("Workflow duplicate cancelled.");
-        return;
-      }
-
-      const saved = await storage.saveWorkflowDefinition(nextWorkflow);
-      await refreshLibrary(saved.stateMachineKey);
-      setLibraryMessage(`Duplicated workflow as ${saved.key}.`);
-    } catch (error) {
-      setLibraryMessage(error instanceof Error ? error.message : "Unable to duplicate workflow version.");
-    }
-  }
-
-  async function deleteStateMachineFromLibrary(key: string) {
-    if (!storage) {
-      setLibraryMessage("Local definition library is not available in this browser.");
-      return;
-    }
-
-    try {
-      const linkedWorkflows = await storage.listWorkflowDefinitionsForStateMachine(key);
-
-      if (linkedWorkflows.length > 0) {
-        setLibraryMessage(`Delete linked workflows before deleting ${key}.`);
-        return;
-      }
-
-      if (!window.confirm(`Delete saved state machine ${key}?`)) {
-        setLibraryMessage("State-machine delete cancelled.");
-        return;
-      }
-
-      await storage.deleteStateMachineDefinition(key);
+      await storage.deleteStateWorkflowDefinition(key);
       await refreshLibrary(null);
-      setLibraryMessage(`Deleted state machine ${key}.`);
+      setLibraryMessage(`Deleted definition ${key}.`);
     } catch (error) {
-      setLibraryMessage(error instanceof Error ? error.message : "Unable to delete state machine from the Library.");
-    }
-  }
-
-  async function deleteWorkflowFromLibrary(key: string) {
-    if (!storage) {
-      setLibraryMessage("Local definition library is not available in this browser.");
-      return;
-    }
-
-    try {
-      const record = await storage.getWorkflowDefinition(key);
-
-      if (!record) {
-        setLibraryMessage(`Workflow ${key} is no longer saved.`);
-        await refreshLibrary();
-        return;
-      }
-
-      if (!window.confirm(`Delete saved workflow ${key}?`)) {
-        setLibraryMessage("Workflow delete cancelled.");
-        return;
-      }
-
-      await storage.deleteWorkflowDefinition(key);
-      await refreshLibrary(record.stateMachineKey);
-      setLibraryMessage(`Deleted workflow ${key}.`);
-    } catch (error) {
-      setLibraryMessage(error instanceof Error ? error.message : "Unable to delete workflow from the Library.");
+      setLibraryMessage(error instanceof Error ? error.message : "Unable to delete definition from the Library.");
     }
   }
 
@@ -1498,30 +1289,16 @@ export function App() {
     localStorage.setItem(appSettingsStorageKey, JSON.stringify(nextSettings));
   }
 
-  async function exportStateMachineDefinition() {
-    const filename = buildDefinitionFilename(definition);
+  async function exportStateWorkflowDefinition() {
+    const bundle = createCurrentStateWorkflowDefinitionBundle(definition, linkedWorkflow);
+    const filename = buildStateWorkflowDefinitionFilename(bundle);
+    const onMessage = activePage === "workflow" ? setWorkflowMessage : setStateMachineMessage;
 
     await saveJsonFile({
-      data: definition,
+      data: bundle,
       filename,
-      description: "State machine definition",
-      onMessage: setStateMachineMessage,
-    });
-  }
-
-  async function exportWorkflowDefinition(includeEmbeddedStateMachine: boolean) {
-    const exportWorkflow = includeEmbeddedStateMachine
-      ? { ...linkedWorkflow, embeddedStateMachineDefinition: definition }
-      : removeEmbeddedStateMachine(linkedWorkflow);
-    const filename = includeEmbeddedStateMachine
-      ? buildBundledWorkflowFilename(linkedWorkflow)
-      : buildWorkflowFilename(linkedWorkflow);
-
-    await saveJsonFile({
-      data: exportWorkflow,
-      filename,
-      description: includeEmbeddedStateMachine ? "Bundled workflow definition" : "Workflow definition",
-      onMessage: setWorkflowMessage,
+      description: "State workflow definition",
+      onMessage,
     });
   }
 
@@ -1558,45 +1335,14 @@ export function App() {
     }
 
     try {
-      await importStateMachineFile(file);
+      await importStateWorkflowFile(file, setStateMachineMessage);
     } finally {
       event.target.value = "";
     }
   }
 
   async function importStateMachineFile(file: File) {
-    if (!isJsonFile(file)) {
-      setStateMachineMessage("Unsupported file type. Choose a .json state-machine definition file.");
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(await file.text()) as EditableDefinition;
-      applyImportedStateMachineDefinition(parsed, setStateMachineMessage);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "Unable to parse the selected file.";
-      setStateMachineMessage(`Invalid JSON. Choose a valid state-machine .json file. ${detail}`);
-    }
-  }
-
-  function applyImportedStateMachineDefinition(
-    value: Partial<EditableDefinition>,
-    onMessage: (message: string | null) => void,
-    successMessage: string | null = null,
-  ) {
-    const nextDefinition = normalizeImportedDefinition(value);
-    const result = validateStateMachineDefinition(nextDefinition);
-
-    if (!result.valid) {
-      onMessage(`Invalid state-machine definition: ${result.errors.map((error) => error.message).join(" ")}`);
-      return false;
-    }
-
-    setDefinition(nextDefinition);
-    setSelectedState(nextDefinition.states[0] ?? "");
-    setWorkflow((current) => ({ ...current, appName: nextDefinition.appName }));
-    onMessage(successMessage);
-    return true;
+    await importStateWorkflowFile(file, setStateMachineMessage);
   }
 
   async function importWorkflowDefinition(event: ChangeEvent<HTMLInputElement>) {
@@ -1607,62 +1353,76 @@ export function App() {
     }
 
     try {
-      await importWorkflowFile(file);
+      await importStateWorkflowFile(file, setWorkflowMessage);
     } finally {
       event.target.value = "";
     }
   }
 
   async function importWorkflowFile(file: File) {
+    await importStateWorkflowFile(file, setWorkflowMessage);
+  }
+
+  async function importStateWorkflowFile(file: File, onMessage: (message: string | null) => void) {
     if (!isJsonFile(file)) {
-      setWorkflowMessage("Unsupported file type. Choose a .json workflow or state-machine definition file.");
+      onMessage("Unsupported file type. Choose a .json state workflow definition bundle.");
       return;
     }
 
     try {
       const parsed = JSON.parse(await file.text()) as unknown;
+      const normalizedBundle = normalizeStateWorkflowDefinitionBundle(parsed);
 
-      if (isImportedStateMachineDefinition(parsed)) {
-        applyImportedStateMachineDefinition(parsed, setWorkflowMessage, "Imported state-machine definition.");
+      if (!normalizedBundle) {
+        onMessage(
+          "Unsupported definition file. Import a strict state workflow definition bundle or an old bundled workflow export.",
+        );
         return;
       }
 
-      const nextWorkflow = normalizeImportedWorkflowDefinition(parsed as ImportedWorkflowDefinition, definition);
-      const effectiveStateMachine = nextWorkflow.embeddedStateMachineDefinition ?? definition;
-      const reconciliation = reconcileWorkflowToStateMachine(nextWorkflow, effectiveStateMachine);
-      const reconciledWorkflow = reconciliation.workflow;
-      const result = validateWorkflowDefinition(reconciledWorkflow, effectiveStateMachine);
-
-      if (!result.valid) {
-        if (canLoadWorkflowWithValidationIssues(result.errors)) {
-          if (nextWorkflow.embeddedStateMachineDefinition) {
-            setDefinition(nextWorkflow.embeddedStateMachineDefinition);
-            setSelectedState(nextWorkflow.embeddedStateMachineDefinition.states[0] ?? "");
-          }
-
-          setWorkflow(removeEmbeddedStateMachine(reconciledWorkflow));
-          setSelectedBucketId(reconciledWorkflow.buckets[0]?.id ?? "");
-          setSelectedLifecycleHookId(reconciledWorkflow.hooks[0]?.id ?? null);
-          setWorkflowMessage(result.errors.map((error) => error.message).join(" "));
-          return;
-        }
-
-        setWorkflowMessage(result.errors.map((error) => error.message).join(" "));
+      if (!applyStateWorkflowDefinitionBundle(normalizedBundle, onMessage)) {
         return;
       }
 
-      if (nextWorkflow.embeddedStateMachineDefinition) {
-        setDefinition(nextWorkflow.embeddedStateMachineDefinition);
-        setSelectedState(nextWorkflow.embeddedStateMachineDefinition.states[0] ?? "");
-      }
-
-      setWorkflow(removeEmbeddedStateMachine(reconciledWorkflow));
-      setSelectedBucketId(reconciledWorkflow.buckets[0]?.id ?? "");
-      setWorkflowMessage(formatWorkflowSyncMessage(reconciliation.summary));
+      onMessage(
+        normalizedBundle.schemaVersion === STATE_WORKFLOW_DEFINITION_SCHEMA_VERSION
+          ? "Imported state workflow definition."
+          : "Imported old bundled workflow as a state workflow definition.",
+      );
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Unable to parse the selected file.";
-      setWorkflowMessage(`Invalid JSON. Choose a valid workflow or state-machine .json file. ${detail}`);
+      onMessage(`Invalid JSON. Choose a valid state workflow definition .json file. ${detail}`);
     }
+  }
+
+  function applyStateWorkflowDefinitionBundle(
+    value: StateWorkflowDefinitionBundle<string>,
+    onMessage: (message: string | null) => void = setLibraryMessage,
+  ) {
+    const result = validateStateWorkflowDefinitionBundle(value);
+
+    if (!result.valid) {
+      onMessage(`Invalid state workflow definition: ${result.errors.map((error) => error.message).join(" ")}`);
+      return false;
+    }
+
+    const nextDefinition = buildValidationStateMachineDefinition(value);
+    const nextWorkflow = buildValidationWorkflowDefinition(value);
+    const reconciliation = reconcileWorkflowToStateMachine(nextWorkflow, nextDefinition);
+    const workflowResult = validateWorkflowDefinition(reconciliation.workflow, nextDefinition);
+
+    if (!workflowResult.valid && !canLoadWorkflowWithValidationIssues(workflowResult.errors)) {
+      onMessage(`Invalid workflow definition: ${workflowResult.errors.map((error) => error.message).join(" ")}`);
+      return false;
+    }
+
+    setDefinition(nextDefinition);
+    setSelectedState(nextDefinition.states[0] ?? "");
+    setWorkflow(removeEmbeddedStateMachine(reconciliation.workflow));
+    setSelectedBucketId(reconciliation.workflow.buckets[0]?.id ?? "");
+    setSelectedLifecycleHookId(reconciliation.workflow.hooks[0]?.id ?? null);
+    onMessage(formatWorkflowSyncMessage(reconciliation.summary));
+    return true;
   }
 
   return (
@@ -1726,7 +1486,7 @@ export function App() {
               type="file"
               accept="application/json,.json"
               onChange={importStateMachineDefinition}
-              aria-label="Import state machine JSON definition"
+              aria-label="Import state workflow JSON definition"
             />
             <input
               ref={workflowFileInputRef}
@@ -1734,28 +1494,19 @@ export function App() {
               type="file"
               accept="application/json,.json"
               onChange={importWorkflowDefinition}
-              aria-label="Import workflow JSON definition"
+              aria-label="Import state workflow JSON definition"
             />
             <ActionMenu
               label="Actions"
               items={[
-                { label: "Import State Machine", onSelect: () => stateMachineFileInputRef.current?.click() },
-                { label: "Import Workflow", onSelect: () => workflowFileInputRef.current?.click() },
-                { label: "Save State Machine", onSelect: saveCurrentStateMachineToLibrary, disabled: !validation.valid },
-                { label: "Save Workflow", onSelect: saveCurrentWorkflowToLibrary, disabled: !workflowValidation.valid },
+                { label: "Import Definition", onSelect: () => workflowFileInputRef.current?.click() },
                 {
-                  label: "Save State Machine and Workflow",
-                  onSelect: saveCurrentStateMachineAndWorkflowToLibrary,
+                  label: "Save Definition",
+                  onSelect: saveCurrentDefinitionToLibrary,
                   disabled: !validation.valid || !workflowValidation.valid,
                 },
                 { label: "Reset Workflow", onSelect: resetWorkflow, danger: true },
-                { label: "Export State Machine", onSelect: exportStateMachineDefinition, disabled: !validation.valid },
-                { label: "Export Workflow", onSelect: () => exportWorkflowDefinition(false), disabled: !workflowValidation.valid },
-                {
-                  label: "Export Bundled Workflow",
-                  onSelect: () => exportWorkflowDefinition(true),
-                  disabled: !workflowValidation.valid,
-                },
+                { label: "Export Definition", onSelect: exportStateWorkflowDefinition, disabled: !validation.valid || !workflowValidation.valid },
               ]}
             />
           </div>
@@ -1768,23 +1519,16 @@ export function App() {
 
       {activePage === "library" ? (
         <LibraryPage
-          currentStateMachineKey={currentStateMachineKey}
-          currentWorkflowKey={currentWorkflowKey}
+          currentDefinitionKey={currentDefinitionKey}
           isReady={isLibraryReady}
           message={libraryMessage}
-          stateMachineRecords={stateMachineRecords}
-          workflowRecords={workflowRecords}
-          selectedStateMachine={selectedLibraryStateMachine}
-          selectedWorkflows={selectedLibraryWorkflows}
-          onSelectStateMachine={setSelectedLibraryStateMachineKey}
-          onSaveStateMachine={saveCurrentStateMachineToLibrary}
-          onSaveWorkflow={saveCurrentWorkflowToLibrary}
-          onLoadStateMachine={loadStateMachineFromLibrary}
-          onLoadWorkflow={loadWorkflowFromLibrary}
-          onDuplicateStateMachine={duplicateStateMachineVersionFromLibrary}
-          onDuplicateWorkflow={duplicateWorkflowVersionFromLibrary}
-          onDeleteStateMachine={deleteStateMachineFromLibrary}
-          onDeleteWorkflow={deleteWorkflowFromLibrary}
+          definitionRecords={definitionRecords}
+          selectedDefinition={selectedLibraryDefinition}
+          onSelectDefinition={setSelectedLibraryDefinitionKey}
+          onSaveDefinition={saveCurrentDefinitionToLibrary}
+          onLoadDefinition={loadDefinitionFromLibrary}
+          onDuplicateDefinition={duplicateDefinitionFromLibrary}
+          onDeleteDefinition={deleteDefinitionFromLibrary}
         />
       ) : null}
 
@@ -1814,7 +1558,7 @@ export function App() {
                 />
               </div>
               <div className="metadata-field">
-                <label htmlFor="definition-version">State Machine Version</label>
+                <label htmlFor="definition-version">Definition Version</label>
                 <input
                   id="definition-version"
                   value={definition.definitionVersion}
@@ -1825,7 +1569,7 @@ export function App() {
             </section>
 
             <JsonImportDropZone
-              title="State Machine JSON"
+              title="Definition JSON"
               detail="Drop or choose a .json file"
               titleId="state-machine-import-title"
               detailId="state-machine-import-detail"
@@ -1844,7 +1588,7 @@ export function App() {
               </div>
               {stateMachineMessage ? <p className="export-message">{stateMachineMessage}</p> : null}
               {validation.valid ? (
-                <p className="valid-message">Ready to export state-machine JSON.</p>
+                <p className="valid-message">Ready to export definition JSON.</p>
               ) : (
                 <ul className="error-list">
                   {validation.errors.map((error, index) => (
@@ -1960,10 +1704,10 @@ export function App() {
                 />
               </div>
               <div className="metadata-field">
-                <label htmlFor="workflow-version">Workflow Version</label>
+                <label htmlFor="workflow-version">Definition Version</label>
                 <input
                   id="workflow-version"
-                  value={linkedWorkflow.workflowVersion}
+                  value={definition.definitionVersion}
                   onChange={(event) => updateWorkflowVersion(event.target.value)}
                   spellCheck={false}
                 />
@@ -1980,8 +1724,8 @@ export function App() {
             </section>
 
             <JsonImportDropZone
-              title="Workflow JSON"
-              detail="Drop linked, bundled, or state-machine .json"
+              title="Definition JSON"
+              detail="Drop strict or old bundled .json"
               titleId="workflow-import-title"
               detailId="workflow-import-detail"
               onChooseFile={() => workflowFileInputRef.current?.click()}
@@ -2001,7 +1745,7 @@ export function App() {
               <div className="validation-summary">
                 <p className={workflowValidation.valid ? "valid-message" : "error-message"}>
                   {workflowValidation.valid
-                    ? "Ready to export linked or bundled workflow JSON."
+                    ? "Ready to export definition JSON."
                     : "Workflow export is blocked until the validation issues are fixed."}
                 </p>
                 {!workflowValidation.valid ? (
@@ -2216,7 +1960,7 @@ export function App() {
                       diagramDirection={settings.diagramDirection}
                       onDiagramDirectionChange={updateDiagramDirection}
                     />
-                    <span className="schema-version">schema v{linkedWorkflow.schemaVersion}</span>
+                    <span className="schema-version">schema v{STATE_WORKFLOW_DEFINITION_SCHEMA_VERSION}</span>
                   </div>
                 </div>
                 <div className="column-scroll graph-scroll">
@@ -2244,44 +1988,28 @@ export function App() {
 }
 
 function LibraryPage({
-  currentStateMachineKey,
-  currentWorkflowKey,
+  currentDefinitionKey,
   isReady,
   message,
-  stateMachineRecords,
-  workflowRecords,
-  selectedStateMachine,
-  selectedWorkflows,
-  onSelectStateMachine,
-  onSaveStateMachine,
-  onSaveWorkflow,
-  onLoadStateMachine,
-  onLoadWorkflow,
-  onDuplicateStateMachine,
-  onDuplicateWorkflow,
-  onDeleteStateMachine,
-  onDeleteWorkflow,
+  definitionRecords,
+  selectedDefinition,
+  onSelectDefinition,
+  onSaveDefinition,
+  onLoadDefinition,
+  onDuplicateDefinition,
+  onDeleteDefinition,
 }: {
-  currentStateMachineKey: string;
-  currentWorkflowKey: string;
+  currentDefinitionKey: string;
   isReady: boolean;
   message: string | null;
-  stateMachineRecords: PersistedStateMachineDefinition[];
-  workflowRecords: PersistedWorkflowDefinition[];
-  selectedStateMachine: PersistedStateMachineDefinition | null;
-  selectedWorkflows: PersistedWorkflowDefinition[];
-  onSelectStateMachine: (key: string) => void;
-  onSaveStateMachine: () => void;
-  onSaveWorkflow: () => void;
-  onLoadStateMachine: (key: string) => void;
-  onLoadWorkflow: (key: string) => void;
-  onDuplicateStateMachine: (key: string) => void;
-  onDuplicateWorkflow: (key: string) => void;
-  onDeleteStateMachine: (key: string) => void;
-  onDeleteWorkflow: (key: string) => void;
+  definitionRecords: PersistedStateWorkflowDefinition[];
+  selectedDefinition: PersistedStateWorkflowDefinition | null;
+  onSelectDefinition: (key: string) => void;
+  onSaveDefinition: () => void;
+  onLoadDefinition: (key: string) => void;
+  onDuplicateDefinition: (key: string) => void;
+  onDeleteDefinition: (key: string) => void;
 }) {
-  const selectedWorkflowCount = selectedWorkflows.length;
-
   return (
     <section className="library-region" aria-label="Definition library">
       <section className="panel library-summary-panel">
@@ -2289,27 +2017,19 @@ function LibraryPage({
           <div>
             <h2>Library</h2>
             <p className="panel-subtitle">
-              {stateMachineRecords.length} state machine{stateMachineRecords.length === 1 ? "" : "s"} ·{" "}
-              {workflowRecords.length} workflow{workflowRecords.length === 1 ? "" : "s"}
+              {definitionRecords.length} definition{definitionRecords.length === 1 ? "" : "s"}
             </p>
           </div>
           <div className="library-actions">
-            <button type="button" className="secondary" onClick={onSaveStateMachine}>
-              Save State Machine
-            </button>
-            <button type="button" className="secondary" onClick={onSaveWorkflow}>
-              Save Workflow
+            <button type="button" className="secondary" onClick={onSaveDefinition}>
+              Save Definition
             </button>
           </div>
         </div>
         <dl className="library-current-keys">
           <div>
-            <dt>Current state machine</dt>
-            <dd>{currentStateMachineKey}</dd>
-          </div>
-          <div>
-            <dt>Current workflow</dt>
-            <dd>{currentWorkflowKey}</dd>
+            <dt>Current definition</dt>
+            <dd>{currentDefinitionKey}</dd>
           </div>
         </dl>
         {message ? <p className="export-message">{message}</p> : null}
@@ -2319,17 +2039,16 @@ function LibraryPage({
       <section className="workspace-grid library-grid">
         <section className="panel column-panel">
           <div className="panel-heading">
-            <h2>State Machines</h2>
-            <span className="schema-version">{stateMachineRecords.length}</span>
+            <h2>Definitions</h2>
+            <span className="schema-version">{definitionRecords.length}</span>
           </div>
           <div className="column-scroll">
-            {stateMachineRecords.length === 0 ? (
-              <div className="empty-column">No saved state machines.</div>
+            {definitionRecords.length === 0 ? (
+              <div className="empty-column">No saved definitions.</div>
             ) : (
-              <div className="library-record-list" role="list" aria-label="Saved state machines">
-                {stateMachineRecords.map((record) => {
-                  const workflowCount = workflowRecords.filter((workflowRecord) => workflowRecord.stateMachineKey === record.key).length;
-                  const selected = selectedStateMachine?.key === record.key;
+              <div className="library-record-list" role="list" aria-label="Saved state workflow definitions">
+                {definitionRecords.map((record) => {
+                  const selected = selectedDefinition?.key === record.key;
 
                   return (
                     <div
@@ -2340,29 +2059,32 @@ function LibraryPage({
                       <button
                         type="button"
                         className="library-record-main"
-                        onClick={() => onSelectStateMachine(record.key)}
+                        onClick={() => onSelectDefinition(record.key)}
                         aria-pressed={selected}
                       >
-                        <span className="library-record-title">{record.definition.id}</span>
+                        <span className="library-record-title">{record.definition.appName}</span>
                         <span className="library-record-version">{record.definition.definitionVersion}</span>
                         <span className="library-record-summary">
-                          {workflowCount} workflow{workflowCount === 1 ? "" : "s"}
+                          {record.definition.id} · {record.definition.workflowDefinition.actions.length} action
+                          {record.definition.workflowDefinition.actions.length === 1 ? "" : "s"} ·{" "}
+                          {record.definition.workflowDefinition.hooks.length} hook
+                          {record.definition.workflowDefinition.hooks.length === 1 ? "" : "s"}
                         </span>
                         <span className="library-record-saved-at" title={record.savedAt}>
                           Saved {formatLibrarySavedAt(record.savedAt)}
                         </span>
                       </button>
                       <div className="library-row-actions">
-                        <button type="button" className="secondary compact" onClick={() => onLoadStateMachine(record.key)}>
+                        <button type="button" className="secondary compact" onClick={() => onLoadDefinition(record.key)}>
                           Load
                         </button>
-                        <button type="button" className="secondary compact" onClick={() => onDuplicateStateMachine(record.key)}>
+                        <button type="button" className="secondary compact" onClick={() => onDuplicateDefinition(record.key)}>
                           Duplicate
                         </button>
                         <button
                           type="button"
                           className="secondary compact danger"
-                          onClick={() => onDeleteStateMachine(record.key)}
+                          onClick={() => onDeleteDefinition(record.key)}
                         >
                           Delete
                         </button>
@@ -2370,53 +2092,6 @@ function LibraryPage({
                     </div>
                   );
                 })}
-              </div>
-            )}
-          </div>
-        </section>
-
-        <section className="panel column-panel">
-          <div className="panel-heading">
-            <div>
-              <h2>Workflows</h2>
-              <p className="panel-subtitle">{selectedStateMachine?.key ?? "No state machine selected"}</p>
-            </div>
-            <span className="schema-version">{selectedWorkflowCount}</span>
-          </div>
-          <div className="column-scroll">
-            {!selectedStateMachine ? (
-              <div className="empty-column">No state machine selected.</div>
-            ) : selectedWorkflows.length === 0 ? (
-              <div className="empty-column">No saved workflows.</div>
-            ) : (
-              <div className="library-record-list" role="list" aria-label="Saved workflows">
-                {selectedWorkflows.map((record) => (
-                  <div key={record.key} className="library-record-row" role="listitem">
-                    <div className="library-record-main static">
-                      <span className="library-record-title">{record.definition.id}</span>
-                      <span className="library-record-version">{record.definition.workflowVersion}</span>
-                      <span className="library-record-summary">
-                        {record.definition.actions.length} action{record.definition.actions.length === 1 ? "" : "s"} ·{" "}
-                        {record.definition.buckets.length} bucket{record.definition.buckets.length === 1 ? "" : "s"} ·{" "}
-                        {record.definition.hooks.length} hook{record.definition.hooks.length === 1 ? "" : "s"}
-                      </span>
-                      <span className="library-record-saved-at" title={record.savedAt}>
-                        Saved {formatLibrarySavedAt(record.savedAt)}
-                      </span>
-                    </div>
-                    <div className="library-row-actions">
-                      <button type="button" className="secondary compact" onClick={() => onLoadWorkflow(record.key)}>
-                        Load
-                      </button>
-                      <button type="button" className="secondary compact" onClick={() => onDuplicateWorkflow(record.key)}>
-                        Duplicate
-                      </button>
-                      <button type="button" className="secondary compact danger" onClick={() => onDeleteWorkflow(record.key)}>
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))}
               </div>
             )}
           </div>
@@ -4629,6 +4304,8 @@ function withCurrentStateMachineReference(
 ): EditableWorkflowDefinition {
   return {
     ...workflow,
+    appName: stateMachine.appName,
+    workflowVersion: stateMachine.definitionVersion,
     stateMachine: {
       id: stateMachine.id,
       definitionVersion: stateMachine.definitionVersion,
@@ -4640,6 +4317,13 @@ function removeEmbeddedStateMachine(workflow: EditableWorkflowDefinition): Edita
   const { embeddedStateMachineDefinition: _embeddedStateMachineDefinition, ...linkedWorkflow } = workflow;
 
   return linkedWorkflow;
+}
+
+function createCurrentStateWorkflowDefinitionBundle(
+  stateMachine: EditableDefinition,
+  workflow: EditableWorkflowDefinition,
+) {
+  return createStateWorkflowDefinitionBundle(stateMachine, removeEmbeddedStateMachine(workflow));
 }
 
 export function buildMermaidDiagram(
@@ -4881,23 +4565,11 @@ function getMermaidThemeVariables(theme: MermaidPreviewTheme) {
   };
 }
 
-function buildDefinitionFilename(definition: EditableDefinition): string {
-  const parts = [definition.appName || "target-project", definition.definitionVersion || "0.0.0", "state-specification"];
-
-  return `${parts.map(sanitizeFilenamePart).join("-")}.json`;
-}
-
-function buildWorkflowFilename(workflow: EditableWorkflowDefinition): string {
-  const parts = [workflow.appName || "target-project", workflow.workflowVersion || "0.0.0", "workflow-definition"];
-
-  return `${parts.map(sanitizeFilenamePart).join("-")}.json`;
-}
-
-function buildBundledWorkflowFilename(workflow: EditableWorkflowDefinition): string {
+function buildStateWorkflowDefinitionFilename(definition: StateWorkflowDefinitionBundle<string>): string {
   const parts = [
-    workflow.appName || "target-project",
-    workflow.workflowVersion || "0.0.0",
-    "workflow-definition-bundled",
+    definition.appName || "target-project",
+    definition.definitionVersion || "0.0.0",
+    "state-workflow-definition",
   ];
 
   return `${parts.map(sanitizeFilenamePart).join("-")}.json`;
